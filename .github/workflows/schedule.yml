@@ -1,0 +1,154 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+# 
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+
+# 默认情况下，使用存储库的GITHUB_TOKEN执行任务时，GITHUB_TOKEN触发的事件不会创建新的工作流运行。这可以防止意外创建递归工作流运行。
+# 可以通过个人TOKEN在工作流运行中触发工作流。
+# 1. 在 https://github.com/settings/tokens 创建 一个 token
+# 2. 在 https://github.com/${{ github.repository }}/settings/secrets/actions 加入上一步创建的 token
+
+
+
+name: Custom Redpill(schedule)
+
+on:
+  issue_comment:
+    types: [created, edited, deleted]
+
+  schedule:
+    - cron: '0 0 * * *'
+
+  workflow_dispatch:
+
+jobs:
+  setlabels:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment'
+    outputs:
+      matrix: ${{ steps.set-matrix.outputs.matrix }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Find schedule comments
+        id: find-comments
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-comments'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          body-includes: 'schedule'
+
+      - name: Get Issues labels
+        id: check-comments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var labels = [];
+            var issuelabels = ${{ toJSON(github.event.issue.labels) }};
+            console.log("issuelabels: " + issuelabels);
+            for (i in issuelabels) {
+                labels.push(issuelabels[i]["name"]);
+            }
+            console.log("labels: " + labels);
+
+            var comments = ${{ steps.find-comments.outputs.comments }};
+            console.log("comments: " + comments);
+
+            var isSchedule = "false";
+            if (comments.length > 0) {
+                if (comments.at(-1)["body"].toLowerCase() == "add schedule") {
+                    isSchedule = "true";
+                }
+            }
+            console.log("isSchedule: " + isSchedule);
+
+            if (isSchedule == "true") {
+                labels.push("schedule");
+            } else {
+                var index = labels.indexOf("schedule");
+                if (index > -1) labels.splice(index, 1);
+            }
+
+            core.setOutput("isSchedule", isSchedule);
+            core.setOutput("labels", labels.join(","));
+
+      - name: Set labels
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'set-labels'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          labels: ${{ steps.check-comments.outputs.labels }}
+
+
+  checklabels:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Find schedule issues
+        id: find-issues
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-issues'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-state: 'all'
+          #title-includes: 'custom'
+          labels: 'schedule'
+
+      - name: Get Issues Info
+        id: get-issues
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var issues = ${{ toJSON(steps.find-issues.outputs.issues) }};
+
+            // '<???>': 替换一次; '/<???>/g': 替换全局; '/<???>/gi': 替换全局并忽略大小写; 
+            issues = issues.replace(/\u0008/g, "");  // \b Backspace
+            issues = issues.replace(/\u0009/g, "");  // \t Tab
+            issues = issues.replace(/\u000A/g, "");  // \n 换行符
+            issues = issues.replace(/\u000B/g, "");  // \v 垂直制表符
+            issues = issues.replace(/\u000C/g, "");  // \f 换页
+            issues = issues.replace(/\u000D/g, "");  // \r 回车
+            //issues = issues.replace(/\u0022/g, "");  // \" 双引号 (")
+            //issues = issues.replace(/\u0027/g, "");  // \' 单引号 (')
+            //issues = issues.replace(/\u005C/g, "");  // \\ 反斜杠 (\)
+            issues = issues.replace(/\u00A0/g, "");  //    不间断空格
+            issues = issues.replace(/\u2028/g, "");  //    行分隔符
+            issues = issues.replace(/\u2029/g, "");  //    段落分隔符
+            issues = issues.replace(/\uFEFF/g, "");  //    字节顺序标记
+
+            core.setOutput("issues", JSON.stringify(issues));
+
+      - name: Reopen Issues
+        uses: jannekem/run-python-script-action@v1.2
+        with:
+          script: |
+            import os, json, requests
+
+            if __name__ == '__main__':
+
+                try:
+                    issues = {}
+                    issues = json.loads(${{ steps.get-issues.outputs.issues }})
+
+                    if len(issues) > 0:
+                        headers = {'Accept': 'application/vnd.github+json', 'Authorization': 'token ${{ secrets.ISSUES }}'}
+                        data = '{"state": "open"}'
+                        for item in issues:
+                            try:
+                                url='https://api.github.com/repos/{}/issues/{}'.format('${{ github.repository }}', item['number'])
+                                res = requests.post(url=url, data=data, headers=headers)
+                                print(url)
+                                print(res.json())
+                            except:
+                                pass
+                except Exception as err:
+                    print(err)

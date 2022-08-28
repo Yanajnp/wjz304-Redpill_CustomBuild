@@ -1,0 +1,751 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+# 
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+
+name: Custom Redpill
+on:
+  issues:
+    types: [opened, reopened]
+  workflow_dispatch:
+    inputs:
+      platform:
+        description: '请选择你需要编译的型号'
+        required: true
+        default: 'DS3622xs+' 
+        type: choice
+        options:
+        - DS3615xs
+        - DS3617xs
+        - DS918+
+        - DS920+
+        - DS3622xs+
+
+      version:
+        description: '请选择你需要编译的版本'
+        required: true
+        default: '7.1.0-42661' 
+        type: choice
+        options:
+        - 7.1.1-42951
+        - 7.1.0-42661
+        - 7.0.1-42218
+        - 6.2.4-25556
+        
+      map: 
+        description: '请输入控制器盘数(SataPortMap)和盘序(DiskIdxMap)两个字段, 并以","间隔. eg: 0, 10'
+        required: false
+        default: ''
+        type: string
+
+      dtb:
+        description: '【仅DS920+】请输入 dtb 文件的下载链接. (支持的文件类型: .dts、.dtb、.tar.gz、.zip)'
+        required: false
+        default: ''
+        type: string
+
+      sn: 
+        description: '请输入序列号. 默认根据型号随机生成. eg: 1980PDN002189'
+        required: false
+        default: ''
+        type: string
+
+      mac: 
+        description: '请输入MAC地址, 多个请以","间隔. 默认根据型号随机生成. eg: 001132888A95, 001132888A96'
+        required: false
+        default: ''
+        type: string
+
+      usb: 
+        description: '请输入设备识别码(pid)和供应商ID(vid)两个字段, 并以","间隔. eg: 0xa4a5, 0x0525'
+        required: false
+        default: '0x0001, 0x46f4'
+        type: string
+
+      ext: 
+        description: '请输入扩展驱动, 多个请以 "," 间隔（请酌情添加，太多起不来）. eg: r8125, tg3'
+        required: false
+        default: ''
+        type: string
+
+      exp:
+        description: '请选择编译依赖的基础库. (7.1 优先选 pocopico, 7.0/jun 优先选 jumkey.)'
+        required: true
+        default: 'pocopico' 
+        type: choice
+        options:
+        - 'pocopico'
+        - 'jumkey'
+
+      jun:
+        description: '请选择是否jun模式编译. (仅7.0.1-42218 版本可选, jun模式 支持 7.0.1~7.1.0u4 的 DSM.)'
+        required: true
+        default: '0' 
+        type: choice
+        options:
+        - '0'
+        - '1'
+
+  workflow_call:
+    inputs:
+      platform:
+        required: true
+        type: string
+
+      version:
+        required: true
+        type: string
+
+      map: 
+        required: true
+        type: string
+
+      dtb: 
+        required: true
+        type: string
+
+      sn:
+        required: true
+        type: string
+
+      mac: 
+        required: true
+        type: string
+
+      usb: 
+        required: true
+        type: string
+
+      ext:
+        required: true
+        type: string
+      
+      exp: 
+        required: true
+        type: string
+
+      jun:
+        required: true
+        type: string
+        
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: 3.1.2
+
+      - name: Set up Python 3
+        uses: actions/setup-python@v2
+        with:
+          python-version: 3.8
+
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Init Env
+        run : |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          python -m pip install --upgrade pip setuptools
+
+      - name: Get Issues Info
+        if: github.event_name == 'issues'
+        id: get-issues
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var issuenumber = ${{ toJSON(github.event.issue.number) }};
+            var issueauth = ${{ toJSON(github.event.issue.user.login) }};
+            var issuetitle = ${{ toJSON(github.event.issue.title) }};
+            var issuebody = ${{ toJSON(github.event.issue.body) }};
+
+            // '<???>': 替换一次; '/<???>/g': 替换全局; '/<???>/gi': 替换全局并忽略大小写; 
+            issuetitle = issuetitle.replace(/\u000A/g, "");  // \n 换行符
+            issuetitle = issuetitle.replace(/\u000D/g, "");  // \r 回车
+
+            issuebody = issuebody.replace(/\u0008/g, "");  // \b Backspace
+            issuebody = issuebody.replace(/\u0009/g, "");  // \t Tab
+            issuebody = issuebody.replace(/\u000A/g, "");  // \n 换行符
+            issuebody = issuebody.replace(/\u000B/g, "");  // \v 垂直制表符
+            issuebody = issuebody.replace(/\u000C/g, "");  // \f 换页
+            issuebody = issuebody.replace(/\u000D/g, "");  // \r 回车
+            //issuebody = issuebody.replace(/\u0022/g, "");  // \" 双引号 (")
+            //issuebody = issuebody.replace(/\u0027/g, "");  // \' 单引号 (')
+            //issuebody = issuebody.replace(/\u005C/g, "");  // \\ 反斜杠 (\)
+            issuebody = issuebody.replace(/\u00A0/g, "");  //    不间断空格
+            issuebody = issuebody.replace(/\u2028/g, "");  //    行分隔符
+            issuebody = issuebody.replace(/\u2029/g, "");  //    段落分隔符
+            issuebody = issuebody.replace(/\uFEFF/g, "");  //    字节顺序标记
+
+            // 容错
+            issuebody = issuebody.replace(/：/g, ": ");
+            issuebody = issuebody.replace(/，/g, ", ");
+            issuebody = issuebody.replace(/“/g, "\"");
+            issuebody = issuebody.replace(/”/g, "\"");
+
+            core.setOutput("issuenumber", JSON.stringify(issuenumber));
+            core.setOutput("issueauth", JSON.stringify(issueauth));
+            core.setOutput("issuetitle", JSON.stringify(issuetitle));
+            core.setOutput("issuebody", JSON.stringify(issuebody));
+
+      - name: Set Issues Info
+        if: github.event_name == 'issues' && success()
+        run: |
+          echo issuenumber: "${{ steps.get-issues.outputs.issuenumber }}"
+          echo issueauth:   "${{ steps.get-issues.outputs.issueauth }}"
+          echo issuetitle:  "${{ steps.get-issues.outputs.issuetitle }}"
+          echo issuebody:   "${{ steps.get-issues.outputs.issuebody }}"
+
+          echo "issuenumber="${{ steps.get-issues.outputs.issuenumber }}"" >> $GITHUB_ENV
+          echo "issueauth="${{ steps.get-issues.outputs.issueauth }}"" >> $GITHUB_ENV
+          echo "issuetitle="${{ steps.get-issues.outputs.issuetitle }}"" >> $GITHUB_ENV
+          echo "issuebody="${{ steps.get-issues.outputs.issuebody }}"" >> $GITHUB_ENV
+
+      - name: Get Build Info
+        uses: jannekem/run-python-script-action@v1.2
+        id: info
+        with:
+          script: |
+            import os, re, json, shutil, string, subprocess
+
+            if __name__ == '__main__':
+
+                issues = 'false'
+                iscustom = 'true'
+                errinfo = ''
+
+                platform = 'DS3622xs+'
+                version = '7.1.0-42661'
+                map = ''
+                dtb = ''
+                sn = ''
+                mac = ''
+                usb = ''
+                ext = ''
+                exp = 'pocopico'
+                jun = '0'
+
+                errinfo = ''
+
+                if '${{ github.event_name }}' == 'issues':
+                    if '${{ env.issuetitle }}'.lower().startswith('custom'):
+                        issues = 'true'
+
+                        body = {}
+                        try:
+                            body = json.loads('${{ env.issuebody }}')
+                            if len(body) == 0:
+                                iscustom = 'false'
+                                errinfo = 'body error, body is null'
+                            else:
+                                if 'platform' in body: platform = body['platform'].strip()
+                                if 'version' in body: version = body['version'].strip()
+                                if 'map' in body: map = body['map'].strip()
+                                if 'dtb' in body: dtb = body['dtb'].strip()
+                                if 'sn' in body: sn = body['sn'].strip()
+                                if 'mac' in body: mac = body['mac'].strip()
+                                if 'usb' in body: usb = body['usb'].strip()
+                                if 'ext' in body: ext = body['ext'].strip()
+                                if 'exp' in body: exp = body['exp'].strip()
+                                if 'jun' in body: jun = body['jun'].strip()
+                        except Exception as err:
+                            iscustom = 'false'
+                            errinfo = 'body error, {}.'.format(err)
+                    else:
+                        iscustom = 'false'
+                else:
+                    platform = '${{ inputs.platform }}'.strip()
+                    version = '${{ inputs.version }}'.strip()
+                    map = '${{ inputs.map }}'.strip()
+                    dtb = '${{ inputs.dtb }}'.strip()
+                    sn = '${{ inputs.sn }}'.strip()
+                    mac = '${{ inputs.mac }}'.strip()
+                    usb = '${{ inputs.usb }}'.strip()
+                    ext = '${{ inputs.ext }}'.strip()
+                    exp = '${{ inputs.exp }}'.strip()
+                    jun = '${{ inputs.jun }}'.strip()
+
+
+                if not platform in ['DS3615xs', 'DS3617xs', 'DS918+', 'DS920+', 'DS3622xs+']:
+                    iscustom = 'false'
+                    errinfo = 'platform parameter error'
+
+                if not version in ['7.1.1-42951', '7.1.0-42661', '7.0.1-42218', '6.2.4-25556']:
+                    iscustom = 'false'
+                    errinfo = 'version parameter error'
+
+                if map != '':
+                    maps = [x.strip() for x in re.split(',| |\|', map) if x.strip() != '']
+                    if len(maps) == 2 and maps[0].isdigit() and all(c in string.hexdigits for c in maps[1]) and len(maps[1]) == 2 * len(maps[0]):
+                        map = ','.join(maps)
+                    else:
+                        iscustom = 'false'
+                        errinfo = 'map parameter error'
+
+                if dtb != '':
+                    url = dtb
+                    try:
+                        try:
+                            import wget, filetype
+                        except ModuleNotFoundError:
+                            os.system('pip3 install wget filetype')
+                            import wget, filetype
+                    
+                        res = wget.download(url)
+                        if res:
+                            down = res
+                            kind = filetype.guess(down)
+                            name = 'user'
+                            if os.path.exists('extract'):  
+                                shutil.rmtree('extract')
+                            if kind.extension == 'zip':
+                                import zipfile
+                                z = zipfile.ZipFile(down, 'r')
+                                z.extractall('extract')
+                            if kind.extension in ['tar', 'gz']:
+                                import tarfile
+                                z = tarfile.open(down) 
+                                z.extractall('extract')
+                            if os.path.exists('extract'):
+                                isfind = False
+                                for root, dirs, files in os.walk('extract'):
+                                    for file in files:
+                                        if file.endswith('.dts') or file.endswith('.dtb'):
+                                            isfind = True
+                                            down = name + os.path.splitext(file)[-1]
+                                            shutil.move(os.path.join(root, file), down)
+                                            break
+                                    if isfind is True:
+                                        break
+
+                            if os.path.exists(down) and (down.endswith('dts') or down.endswith('dtb')):
+                                if down.endswith('dts'):
+                                    wget.download('https://raw.githubusercontent.com/pocopico/rp-ext/main/redpill-dtb-static/releases/dtc')
+                                    if os.path.exists('dtc'):
+                                        print('./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
+                                        os.system('sudo chmod a+x dtc')
+                                        p = subprocess.Popen('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name), shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                        errinfo = p.stderr.read().decode('utf-8')
+                                        os.system('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
+                                        if os.path.exists('{}.dtb'.format(name)) and os.path.getsize('{}.dtb'.format(name)) > 0:
+                                            print('dtc ok ...')
+                                            dtb = os.path.abspath('{}.dtb'.format(name))
+                                        else:
+                                            iscustom = 'false'
+                                            errinfo = 'dtb parameter error, <{}>.'.format(errinfo.replace('\r', '').replace('\n', ' '))
+                                    else:
+                                        iscustom = 'false'
+                                        errinfo = 'dtb parameter error, <dtc tool download error, Please try again later>.'
+                                else:
+                                    dtb = os.path.abspath(down)
+                            else:
+                                iscustom = 'false'
+                                errinfo = 'dtb parameter error, <urlfile error no valid ".dts/.dtb" file found>.'
+                    except Exception as err:
+                        iscustom = 'false'
+                        errinfo = 'dtb parameter error, {}.'.format(err)
+
+                if sn != '' and not sn.isalnum():
+                    iscustom = 'false'
+                    errinfo = 'sn parameter error'
+
+                if mac != '':
+                    macs = [x.strip() for x in re.split(',| |\|', mac) if x.strip() != '']
+                    if len(macs) > 0 or len(macs) <= 8:
+                        mac = ','.join(macs)
+                    else:
+                        iscustom = 'false'
+                        errinfo = 'mac parameter error'
+
+                if usb != '':
+                    usbs = [x.strip() for x in re.split(',| |\|', usb) if x.strip() != '']
+                    if len(usbs) == 2 \
+                    and len(usbs[0]) == 6 and usbs[0].lower().startswith('0x') and all(c in string.hexdigits for c in usbs[0][2:]) \
+                    and len(usbs[1]) == 6 and usbs[1].lower().startswith('0x') and all(c in string.hexdigits for c in usbs[1][2:]):
+                        usb = ','.join(usbs)
+                    else:
+                        iscustom = 'false'
+                        errinfo = 'usb parameter error'
+
+
+                if ext != '':
+                    try:
+                        import wget
+                    except ModuleNotFoundError:
+                        os.system('pip3 install wget')
+                        import wget
+                    if os.path.exists('rpExtsFile'):
+                        os.remove('rpExtsFile')
+                    res = wget.download('https://raw.githubusercontent.com/pocopico/rp-ext/main/exts', out='rpExtsFile')
+                    with open('rpExtsFile', mode="r") as f:
+                        rpExts = f.readlines()
+                    rpExts = [x.strip() for x in rpExts]
+                    exts = [x.strip() for x in re.split(',| |\|', ext) if x.strip() != '']
+                    if len(exts) > 0 and set(exts) <= set(rpExts):
+                        ext = ','.join(exts)
+                    else:
+                        iscustom = 'false'
+                        errinfo = 'ext parameter error'
+
+                if not exp in ['pocopico', 'jumkey']:
+                    iscustom = 'false'
+                    errinfo = 'exp parameter error'
+
+                if not jun in ['0', '1']:
+                    iscustom = 'false'
+                    errinfo = 'jun parameter error'
+
+                set_output('issues', issues)
+                set_output('iscustom', iscustom)
+                set_output('errinfo', errinfo)
+
+                set_output('platform', platform)
+                set_output('version', version)
+                set_output('map', map)
+                set_output('dtb', dtb)
+                set_output('sn', sn)
+                set_output('mac', mac)
+                set_output('usb', usb)
+                set_output('ext', ext)
+                set_output('exp', exp)
+                set_output('jun', jun)
+
+      - name: Echo Build Info
+        run: |
+          echo issues:    "${{ steps.info.outputs.issues }}"
+          echo iscustom:  "${{ steps.info.outputs.iscustom }}"
+          echo errinfo:   "${{ steps.info.outputs.errinfo }}"
+          echo platform:  "${{ steps.info.outputs.platform }}"
+          echo version:   "${{ steps.info.outputs.version }}"
+          echo map:       "${{ steps.info.outputs.map }}"
+          echo dtb:       "${{ steps.info.outputs.dtb }}"
+          echo sn:        "${{ steps.info.outputs.sn }}"
+          echo mac:       "${{ steps.info.outputs.mac }}"
+          echo usb:       "${{ steps.info.outputs.usb }}"
+          echo ext:       "${{ steps.info.outputs.ext }}"
+          echo exp:       "${{ steps.info.outputs.exp }}"
+          echo jun:       "${{ steps.info.outputs.jun }}"
+
+      - name: Add Issues labels
+        if: steps.info.outputs.issues == 'true' && steps.info.outputs.iscustom == 'true'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'add-labels'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+          labels: 'custom'
+
+      - name: Create Issues comment
+        if: steps.info.outputs.issues == 'true' && steps.info.outputs.iscustom == 'true'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+          body: |
+            ${{ env.issueauth }} 您好.
+            您自定义的 Redpill 已开始构建。请前往下面的 URL 查看详细信息。
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+            ----
+            Hi ${{ env.issueauth }}. 
+            Your customized Redpill has started building. Please click the URL below to view the details.
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          emoji: heart
+
+      - name: Create Issues comment
+        if: steps.info.outputs.issues == 'true' && steps.info.outputs.iscustom == 'false'
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+          body: |
+            ${{ env.issueauth }} 您好.
+            您自定义 Redpill 所填写的信息无法解析, 请参考模板并请重新发起定制。  
+            error info: ${{ steps.info.outputs.errinfo }}
+            > 
+            ----
+            Hi ${{ env.issueauth }}. 
+            The information filled in by your customized Redpill cannot be parsed. Please refer to the template and restart customization.
+            error info: ${{ steps.info.outputs.errinfo }}
+            > 
+          emoji: confused
+
+      - name: Create Config File
+        if: steps.info.outputs.iscustom == 'true'
+        uses: jannekem/run-python-script-action@v1.2
+        with:
+          script: |
+            import os, json
+
+            if __name__ == '__main__':
+                config = {
+                    "extra_cmdline": {
+                        "pid": "0x0001",
+                        "vid": "0x46f4",
+                        "sn": "2150SQRW1ZAHH",
+                        "mac1": "001132FA6CD3"
+                    },
+                    "synoinfo": {
+                        "internalportcfg": "0xffff",
+                        "maxlanport": "7"
+                    },
+                    "ramdisk_copy": {}
+                }
+
+                dat = []
+                if '${{ steps.info.outputs.sn }}' == '' or '${{ steps.info.outputs.mac }}' == '':
+                    try:
+                        import wget
+                    except ModuleNotFoundError:
+                        os.system('pip3 install wget')
+                        import wget
+                    res = wget.download('https://raw.githubusercontent.com/pocopico/tinycore-redpill/main/serialnumbergen.sh', out='serialnumbergen.sh')
+                    os.system('sed -i "s|DS3622xsp|DS3622xs+|g" serialnumbergen.sh')
+                    os.system('sed -i "s|echo.*\$(generateMacAddress)|echo \$(generateMacAddress)|g" serialnumbergen.sh')
+                    os.system('sed -i "s|echo.*\$(generateSerial \$1)|echo \$(generateSerial \$1)|g" serialnumbergen.sh')
+                    dat = os.popen('bash ./serialnumbergen.sh ${{ steps.info.outputs.platform }}').readlines()
+
+                if '${{ steps.info.outputs.sn }}' != '':
+                    config["extra_cmdline"]["sn"] = '${{ steps.info.outputs.sn }}'
+                elif len(dat) == 2:
+                    config["extra_cmdline"]["sn"] = dat[1].strip()
+
+                if '${{ steps.info.outputs.mac }}' != '':
+                    macs = '${{ steps.info.outputs.mac }}'.split(',')
+                    for index, item in enumerate(macs):
+                        config["extra_cmdline"]["mac{}".format(index+1)] = item.replace(':', '').upper()
+                    config["extra_cmdline"]["netif_num"] = len(macs)
+                elif len(dat) == 2:
+                    config["extra_cmdline"]["mac1"] = dat[0].strip().replace(':', '')
+                    config["extra_cmdline"]["mac2"] = hex(int(dat[0].strip().replace(':', ''), 16) + 1)[2:].rjust(12,'0').upper()
+                    config["extra_cmdline"]["netif_num"] = 2
+
+                if '${{ steps.info.outputs.map }}' != '':
+                    maps = '${{ steps.info.outputs.map }}'.split(',')
+                    if len(maps) == 2:
+                        config["extra_cmdline"]["SataPortMap"] = maps[0]
+                        config["extra_cmdline"]["DiskIdxMap"] = maps[1]
+
+                if '${{ steps.info.outputs.usb }}' != '':
+                    usbs = '${{ steps.info.outputs.usb }}'.split(',')
+                    if len(usbs) == 2:
+                        config["extra_cmdline"]["pid"] = usbs[0]
+                        config["extra_cmdline"]["vid"] = usbs[1]
+
+                print(json.dumps(config, indent=4))
+
+                with open('user_config.json', 'w', encoding="utf-8") as f:
+                    f.write(json.dumps(config, indent=4))
+                  
+      - name: Run Build
+        if: steps.info.outputs.iscustom == 'true' && success()
+        run: |
+          function exdsmpat() {
+            pwd
+            cd ./cache
+            path=7.0.1/42218
+            if [ "$2" == "42661" ]; then
+              path=7.1/42661-1
+            fi
+            if [ "$2" == "42951" ]; then
+              path=7.1.1/42951
+            fi
+            curl -L https://cndl.synology.cn/download/DSM/release/${path}/DSM_$1_$2.pat -o ds.pat
+            curl -L https://cndl.synology.cn/download/DSM/release/7.0.1/42218/DSM_$1_42218.pat -o oldpat.tar.gz
+            mkdir synoesp && tar -C./synoesp/ -xf oldpat.tar.gz rd.gz
+            cd synoesp
+            xz -dc < rd.gz >rd 2>/dev/null || echo "extract rd.gz"
+            cpio -idm <rd 2>&1 || echo "extract rd"
+            mkdir extract
+            cp ./usr/lib/libcurl.so.4 ./usr/lib/libmbedcrypto.so.5 ./usr/lib/libmbedtls.so.13 ./usr/lib/libmbedx509.so.1 ./usr/lib/libmsgpackc.so.2 ./usr/lib/libsodium.so ./usr/lib/libsynocodesign-ng-virtual-junior-wins.so.7 ./usr/syno/bin/scemd ./extract/
+            cd extract && ln -s scemd syno_extract_system_patch && cd ..
+            cd ..
+            mkdir pat
+            sudo LD_LIBRARY_PATH=synoesp/extract synoesp/extract/syno_extract_system_patch ds.pat pat || echo "extract latest pat"
+            tar -czvf $3 -C ./pat/ . --warning=no-file-changed
+            ls -al
+            sudo rm -rf ds.pat oldpat.tar.gz synoesp pat
+            ls -al
+            sha256sum $3
+            cd ..
+            pwd
+          }
+
+          sudo apt update
+          sudo apt upgrade -y
+          sudo apt install curl bspatch jq git -y
+
+          # 开始表演
+
+          repo=${{ steps.info.outputs.exp }}
+          branch=develop
+          bArgs=''
+          if [ ${{ steps.info.outputs.jun }} == '1' ]; then 
+            bArgs='BRP_JUN_MOD=1 BRP_DEBUG=1'
+            if [ ${repo} == 'pocopico' ]; then 
+              branch=jun
+            fi
+          fi
+
+          git clone -b ${branch} https://github.com/${repo}/redpill-load redpill-load
+
+          cp user_config.json redpill-load/user_config.json
+
+          cd redpill-load
+
+          synoplatform=$(echo ${{ steps.info.outputs.platform }} | sed 's/DS/ds/g; s/+/p/g')       # DS3622xs+ => ds3622xsp
+          synoversion=$(echo ${{ steps.info.outputs.version }} | awk -F - '{print $2}')            # 7.0.1-42218 => 42218
+
+          # 7.1 解密PAT
+          if [[ "${{ steps.info.outputs.version }}" > "7.0.1-42218" ]]; then 
+            newpat=${synoplatform}_${synoversion}.pat
+            exdsmpat ${{ steps.info.outputs.platform }} ${synoversion} ${newpat}
+            ls -al ./cache
+            configfile=./config/${{ steps.info.outputs.platform }}/${{ steps.info.outputs.version }}/config.json
+            jq -r .os.sha256 ${configfile}
+            sed -i "s/$(jq -r .os.sha256 ${configfile})/$(sha256sum ./cache/${newpat} | awk '{print $1}')/g" ${configfile}
+            jq -r .os.sha256 ${configfile}
+          fi
+
+          # 添加必备驱动
+          #./ext-manager.sh add https://raw.githubusercontent.com/${repo}/redpill-load/${branch}/redpill-boot-wait/rpext-index.json
+          ./ext-manager.sh add https://raw.githubusercontent.com/${repo}/redpill-load/${branch}/redpill-acpid/rpext-index.json
+          ./ext-manager.sh add https://raw.githubusercontent.com/${repo}/redpill-load/${branch}/redpill-misc/rpext-index.json
+          ./ext-manager.sh add https://raw.githubusercontent.com/${repo}/redpill-load/${branch}/redpill-virtio/rpext-index.json
+
+          # redpill.ko 方式一 
+          extension=$(curl -s --location "https://raw.githubusercontent.com/pocopico/rp-ext/master/redpill/rpext-index.json")
+          redpilltgz=$(curl -s --location "$(echo ${extension} | jq -r .releases.${synoplatform}_${synoversion})" | jq -r '.files[] .url')
+          [ "$(echo $redpilltgz | awk '{print $NF}')" != "$redpilltgz" ] && redpilltgz=$(echo $redpilltgz | awk '{print $1}')
+          wget ${redpilltgz}
+          tar zxvf $(echo ${redpilltgz} | awk -F / '{print $NF}') -C ./ 
+          mv ./redpill.ko ./ext/rp-lkm/redpill-linux-v$(modinfo redpill.ko | grep vermagic | awk '{print $2}').ko
+
+          # # redpill.ko 方式二 
+          # git clone -b develop --depth=1 https://github.com/jumkey/redpill-lkm.git
+          # # download syno toolkit
+          # curl --location "https://global.download.synology.com/download/ToolChain/toolkit/7.0/broadwellnk/ds.broadwellnk-7.0.dev.txz" --output ds.broadwellnk-7.0.dev.txz
+          # mkdir broadwellnk && tar -C./broadwellnk/ -xf ds.broadwellnk-7.0.dev.txz usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-7.0/build
+          # # build redpill-lkm
+          # cd redpill-lkm
+          # sed -i 's/   -std=gnu89/   -std=gnu89 -fno-pie/' ../broadwellnk/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-7.0/build/Makefile
+          # make LINUX_SRC=../broadwellnk/usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-7.0/build dev-v7
+          # read -a KVERS <<< "$(sudo modinfo --field=vermagic redpill.ko)" && cp -fv redpill.ko ../redpill-load/ext/rp-lkm/redpill-linux-v${KVERS[0]}.ko || exit 1
+          # cd ..
+
+          if [ ${{ steps.info.outputs.platform }} == 'DS920+' ]; then
+            ./ext-manager.sh add https://raw.githubusercontent.com/pocopico/rp-ext/master/redpill-dtb-static/rpext-index.json
+            ./ext-manager.sh _update_platform_exts ${synoplatform}_${synoversion} redpill-dtb-static
+
+            if [ -n "${{ steps.info.outputs.dtb }}" ]; then
+              dtbuserfile="${{ steps.info.outputs.dtb }}"
+              dtbextfile="$(find custom -name model_${synoplatform}.dtb)"
+              echo Copying ${dtbuserfile} to ${dtbextfile} ...
+              sudo cp ${dtbuserfile} ${dtbextfile}
+            fi
+          fi
+
+          # 添加扩展驱动
+          if [ -n "${{ steps.info.outputs.ext }}" ]; then
+            ext=${{ steps.info.outputs.ext }}
+            exts=(${ext//,/ })
+            for item in ${exts[@]}
+            do
+              ./ext-manager.sh add "https://raw.githubusercontent.com/pocopico/rp-ext/master/${item}/rpext-index.json"
+            done
+          fi
+
+          # 编译
+          # sed -i "s|#!/usr/bin/env bash|#!/usr/bin/env -S bash -x|g" ./build-loader.sh
+          sudo ${bArgs} BRP_USER_CFG=user_config.json ./build-loader.sh '${{ steps.info.outputs.platform }}' '${{ steps.info.outputs.version }}'
+
+          ls -al ./custom/extensions
+
+      - name: Generate release tag
+        if: steps.info.outputs.iscustom == 'true' && success()
+        id: tag
+        run: |
+          if [ ${{ steps.info.outputs.issues }} == 'true' ]; then
+            echo "### ${{ env.issueauth }}'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
+            echo "👉 issues: [#${{ env.issuenumber }}]($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/issues/${{ env.issuenumber }})" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### $(echo "$GITHUB_REPOSITORY" | awk -F / '{print $1}')'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
+            echo "👉 "platform": "${{ steps.info.outputs.platform }}"  " >> $GITHUB_STEP_SUMMARY
+            echo "👉 "version": "${{ steps.info.outputs.version }}", "jun": "${{ steps.info.outputs.jun }}"  " >> $GITHUB_STEP_SUMMARY
+            echo "👉 "ext": "${{ steps.info.outputs.ext }}"  " >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "::set-output name=release_tag::$(date +"%Y.%m.%d-%H%M")"
+          echo "::set-output name=repository_name::$(echo "$GITHUB_REPOSITORY" | awk -F / '{print $2}')"
+
+      - name: Upload to Artifacts
+        if: steps.info.outputs.iscustom == 'true' && success()
+        uses: actions/upload-artifact@v3
+        with:
+          name: ${{ steps.tag.outputs.repository_name }}-Custom-${{ steps.tag.outputs.release_tag }}
+          path: |
+            redpill-load/user_config.json
+            redpill-load/images/*.img
+
+      - name: Generate release tag
+        if: steps.info.outputs.iscustom == 'false'
+        run: |
+          if [ ${{ steps.info.outputs.issues }} == 'true' ]; then
+            echo "### ${{ env.issueauth }}'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "### $(echo "$GITHUB_REPOSITORY" | awk -F / '{print $1}')'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
+          fi
+          echo "😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢  " >> $GITHUB_STEP_SUMMARY
+          echo "您自定义 Redpill 所填写的信息无法解析, 请参考模板并请重新发起定制。  " >> $GITHUB_STEP_SUMMARY
+          echo "error info: ${{ steps.info.outputs.errinfo }}  " >> $GITHUB_STEP_SUMMARY
+
+      - name: Create Issues Comment
+        if: steps.info.outputs.issues == 'true' && steps.info.outputs.iscustom == 'true' && success()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+          body: |
+            ${{ env.issueauth }} 您好.
+            您自定义的 Redpill 已构建完成。请前往下面的 URL 下载。
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
+            ----
+            Hi ${{ env.issueauth }}. 
+            Your customized Redpill has been builded. Please click the URL below to download it.
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          emoji: hooray
+
+      - name: Close Issues
+        if: steps.info.outputs.issues == 'true' && steps.info.outputs.iscustom == 'true' && success()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'close-issue'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+
+      - name: Create Issues Comment
+        if: steps.info.outputs.issues == 'true' && steps.info.outputs.iscustom == 'true' && failure()
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'create-comment'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ env.issuenumber }}
+          body: |
+            ${{ env.issueauth }} 您好.
+            您自定义的 Redpill 构建失败。请前往下面的 URL 查看详细信息。请自行关闭本 Issues 并在进行调整后重新创建一个 Issues 来发起重新构建。
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
+            ----
+            Hi ${{ env.issueauth }}. 
+            Your customized Redpill build failed. Please click the URL below to view the details. Please close this issue by yourself and re create an issue after adjustment to initiate the rebuild.
+            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          emoji: hooray
+

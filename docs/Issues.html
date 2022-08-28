@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html
+  lang="en"
+  data-color-mode="auto"
+  data-light-theme="light"
+  data-dark-theme="dark"
+  data-a11y-animated-images="system"
+>
+  <head>
+    <meta charset="utf-8" />
+    <link rel="dns-prefetch" href="https://github.githubassets.com" />
+    <link rel="dns-prefetch" href="https://avatars.githubusercontent.com" />
+    <link rel="dns-prefetch" href="https://github-cloud.s3.amazonaws.com" />
+    <link
+      rel="dns-prefetch"
+      href="https://user-images.githubusercontent.com/"
+    />
+    <link rel="preconnect" href="https://github.githubassets.com" crossorigin />
+    <link rel="preconnect" href="https://avatars.githubusercontent.com" />
+
+    <link
+      crossorigin="anonymous"
+      media="all"
+      rel="stylesheet"
+      href="https://github.githubassets.com/assets/light-92c7d381038e.css"
+    />
+    <link
+      crossorigin="anonymous"
+      media="all"
+      rel="stylesheet"
+      href="https://github.githubassets.com/assets/dark-d4a90c367f0c.css"
+    />
+
+    <link
+      crossorigin="anonymous"
+      media="all"
+      rel="stylesheet"
+      href="https://github.githubassets.com/assets/primer-665d09058d18.css"
+    />
+    <link
+      crossorigin="anonymous"
+      media="all"
+      rel="stylesheet"
+      href="https://github.githubassets.com/assets/global-ef47aa3710b2.css"
+    />
+    <link
+      crossorigin="anonymous"
+      media="all"
+      rel="stylesheet"
+      href="https://github.githubassets.com/assets/github-fee1576e5bd2.css"
+    />
+    <link
+      crossorigin="anonymous"
+      media="all"
+      rel="stylesheet"
+      href="https://github.githubassets.com/assets/actions-5e1227d9a285.css"
+    />
+    <style>
+      select,
+      input {
+        width: 400px;
+      }
+    </style>
+    <script src="https://code.jquery.com/jquery-3.3.1.min.js"></script>
+    <script src="./dist/yaml.js"></script>
+
+    <script type="application/javascript">
+      function httpGetAsync(theUrl, callback) {
+        let xmlHttpReq = new XMLHttpRequest();
+        xmlHttpReq.onreadystatechange = function () {
+          if (xmlHttpReq.readyState == 4 && xmlHttpReq.status == 200)
+            callback(xmlHttpReq.responseText);
+        };
+        xmlHttpReq.open("GET", theUrl, true); // true for asynchronous
+        xmlHttpReq.send(null);
+      }
+
+      window.onload = function () {
+        httpGetAsync(
+          "https://raw.githubusercontent.com/wjz304/Redpill_CustomBuild/main/.github/workflows/custom.yml",
+          function (result) {
+            yaml = YAML.parse(result);
+            if (yaml.hasOwnProperty("on")) {
+              inputs = yaml.on.workflow_dispatch.inputs;
+              console.log(inputs);
+              $("#inputs").find("div").remove(); //html('');
+              var html = "";
+              html += createInput(
+                "title",
+                "title",
+                "请输入一个自定义的名称（请具有一定的标识性，且不要包含'(单引号),\"(双引号) 等转义字符）",
+                false,
+                new Date().toISOString().substr(0, 10),
+                true
+              );
+              for (var field in inputs) {
+                var ff = inputs[field];
+                var dft = "";
+                var need = false;
+                if (ff.hasOwnProperty("required")) need = ff.required;
+                if (ff.hasOwnProperty("default")) dft = ff.default;
+                if (ff.type == "choice") {
+                  html += createSelect(
+                    field,
+                    field,
+                    ff.description,
+                    ff.options,
+                    dft,
+                    need
+                  );
+                } else if (ff.type == "string") {
+                  html += createInput(
+                    field,
+                    field,
+                    ff.description,
+                    ff.options,
+                    dft,
+                    need
+                  );
+                } else {
+                  console.log(field, inputs[field]);
+                }
+              }
+              $("#inputs").prepend(html);
+              createExtBtn();
+            } else {
+              console.log(yaml);
+            }
+          }
+        );
+      };
+
+      function processext(ext) {
+        var obj = $("#ext_btn_" + ext.replace(/\./g, "·"));
+        var exts = $("#ext").val().split(",");
+        console.log(exts);
+        if (obj.hasClass("btn-danger")) {
+          //要删除掉已经输入的内容
+          exts.map((val, i) => {
+            if (val === ext) {
+              exts.splice(i, 1);
+            }
+          });
+          obj.removeClass("btn-danger");
+        } else {
+          obj.addClass("btn-danger");
+          exts.push(ext);
+        }
+        exts.map((val, i) => {
+          if (val === "") {
+            exts.splice(i, 1);
+          }
+        });
+        $("#ext").val(exts.join(","));
+      }
+      function createExtBtn() {
+        httpGetAsync(
+          "https://raw.githubusercontent.com/pocopico/rp-ext/main/exts",
+          function (result) {
+            var exts = result.trim().split("\n");
+            var html = "";
+            let idx = 1;
+            for (var i in exts) {
+              html +=
+                '<button type="button" class="btn btn-primary btn-sm mt-2" id="ext_btn_' +
+                exts[i].replace(/\./g, "·") +
+                '" onclick="return processext(\'' +
+                exts[i] +
+                '\')" autofocus="" >';
+              html += exts[i];
+              html += "</button>&nbsp;";
+              if (idx++ % 15 == 0) html += "<br />";
+            }
+            $($("#ext").parent().parent()).append(html);
+            $("#ext").prop("readonly", true);
+          }
+        );
+      }
+
+      function createInput(title, name, desc, opts, dft, req) {
+        var html = '<div class="form-group mt-1 mb-2 ';
+        if (req) html += "required";
+        html +=
+          '"><div class="form-group-header"><label class="color-fg-default text-mono f6" for="' +
+          name +
+          '">' +
+          title +
+          '</label></div><div class="form-group-body">';
+        html +=
+          '<input class="form-control input-contrast input-sm" type="text" id="' +
+          name +
+          '" name="inputs[' +
+          name +
+          ']" value="' +
+          dft +
+          '" />';
+        html += "使用说明：" + desc;
+        html += "</div></div>";
+        return html;
+      }
+
+      function createSelect(title, name, desc, opts, dft, req) {
+        var html = '<div class="form-group mt-1 mb-2 ';
+        if (req) html += "required";
+        html +=
+          '"><div class="form-group-header"><label class="color-fg-default text-mono f6" for="' +
+          name +
+          '">' +
+          title +
+          '</label></div><div class="form-group-body">';
+        html +=
+          '<select class="form-select form-control select-sm input-contrast" id="' +
+          name +
+          '" required=""';
+        html += 'name="inputs[' + name + ']"value="' + dft + '">';
+        for (var v in opts) {
+          var addpar = "";
+          if (opts[v] == dft) addpar = ' selected="selected"';
+          html +=
+            "<option" +
+            addpar +
+            ' value="' +
+            opts[v] +
+            '">' +
+            opts[v] +
+            "</option>";
+        }
+        html += "</select>";
+        html += "使用说明：" + desc;
+        html += "</div></div>";
+        return html;
+      }
+
+      function createIssues() {
+        var form = document.getElementById("inputs");
+        let formData = new FormData(form);
+
+        body = {};
+        if (formData.get("inputs[platform]")) body["platform"] = formData.get("inputs[platform]");
+        if (formData.get("inputs[version]")) body["version"] = formData.get("inputs[version]");
+        if (formData.get("inputs[map]")) body["map"] = formData.get("inputs[map]");
+        if (formData.get("inputs[dtb]")) body["dtb"] = formData.get("inputs[dtb]");
+        if (formData.get("inputs[sn]")) body["sn"] = formData.get("inputs[sn]");
+        if (formData.get("inputs[mac]")) body["mac"] = formData.get("inputs[mac]");
+        if (formData.get("inputs[usb]")) body["usb"] = formData.get("inputs[usb]");
+        if (formData.get("inputs[ext]")) body["ext"] = formData.get("inputs[ext]");
+        if (formData.get("inputs[exp]")) body["exp"] = formData.get("inputs[exp]");
+        if (formData.get("inputs[jun]")) body["jun"] = formData.get("inputs[jun]");
+        title = "Custom " + formData.get("inputs[title]");
+        var data =
+          "title=" +
+          title +
+          "&body=" +
+          JSON.stringify(body).replace(/\+/g, "%2b");
+        window.location.href =
+          "https://github.com/wjz304/Redpill_CustomBuild/issues/new?" + data;
+      }
+    </script>
+
+    <title>wjz304/Redpill_CustomBuild</title>
+  </head>
+
+  <body
+    class="logged-in env-production page-responsive"
+    style="word-wrap: break-word"
+  >
+    <div class="application-main mt-2 left-0 text-left p-3 mx-auto">
+      <pre
+        style="
+          font-family: ui-monospace, SFMono-Regular, SF Mono, Menlo, Consolas,
+            Liberation Mono, monospace !important;
+          font-size: 12px !important;
+          line-height: 12px !important;
+          margin: 15px 10px;
+          color: red;
+        "
+      >
+ ██████╗ ███████╗██████╗ ██████╗ ██╗██╗     ██╗          ██████╗██╗   ██╗███████╗████████╗ ██████╗ ███╗   ███╗██████╗ ██╗   ██╗██╗██╗     ██████╗ 
+ ██╔══██╗██╔════╝██╔══██╗██╔══██╗██║██║     ██║         ██╔════╝██║   ██║██╔════╝╚══██╔══╝██╔═══██╗████╗ ████║██╔══██╗██║   ██║██║██║     ██╔══██╗
+ ██████╔╝█████╗  ██║  ██║██████╔╝██║██║     ██║         ██║     ██║   ██║███████╗   ██║   ██║   ██║██╔████╔██║██████╔╝██║   ██║██║██║     ██║  ██║
+ ██╔══██╗██╔══╝  ██║  ██║██╔═══╝ ██║██║     ██║         ██║     ██║   ██║╚════██║   ██║   ██║   ██║██║╚██╔╝██║██╔══██╗██║   ██║██║██║     ██║  ██║
+ ██║  ██║███████╗██████╔╝██║     ██║███████╗███████╗    ╚██████╗╚██████╔╝███████║   ██║   ╚██████╔╝██║ ╚═╝ ██║██████╔╝╚██████╔╝██║███████╗██████╔╝
+ ╚═╝  ╚═╝╚══════╝╚═════╝ ╚═╝     ╚═╝╚══════╝╚══════╝     ╚═════╝ ╚═════╝ ╚══════╝   ╚═╝    ╚═════╝ ╚═╝     ╚═╝╚═════╝  ╚═════╝ ╚═╝╚══════╝╚═════╝ 
+      </pre>
+      <div class="flex-auto min-width-0 width-fit mr-3">
+        <div
+          class="d-flex flex-wrap flex-items-center wb-break-word f3 text-normal"
+        >
+          <svg
+            aria-hidden="true"
+            height="16"
+            viewBox="0 0 16 16"
+            version="1.1"
+            width="16"
+            data-view-component="true"
+            class="octicon octicon-repo color-fg-muted mr-2"
+          >
+            <path
+              fill-rule="evenodd"
+              d="M2 2.5A2.5 2.5 0 014.5 0h8.75a.75.75 0 01.75.75v12.5a.75.75 0 01-.75.75h-2.5a.75.75 0 110-1.5h1.75v-2h-8a1 1 0 00-.714 1.7.75.75 0 01-1.072 1.05A2.495 2.495 0 012 11.5v-9zm10.5-1V9h-8c-.356 0-.694.074-1 .208V2.5a1 1 0 011-1h8zM5 12.25v3.25a.25.25 0 00.4.2l1.45-1.087a.25.25 0 01.3 0L8.6 15.7a.25.25 0 00.4-.2v-3.25a.25.25 0 00-.25-.25h-3.5a.25.25 0 00-.25.25z"
+            ></path>
+          </svg>
+          <strong itemprop="name" class="mr-2 flex-self-stretch">
+            <a
+              data-pjax="#repo-content-pjax-container"
+              data-turbo-frame="repo-content-turbo-frame"
+              href="https://github.com/wjz304/Redpill_CustomBuild"
+              >Redpill_CustomBuild</a
+            >
+          </strong>
+
+          <span></span
+          ><span class="Label Label--secondary v-align-middle mr-1"
+            >Public</span
+          >
+        </div>
+      </div>
+      <div data-replace-remote-form-target="" class="workflow-dispatch">
+        <form id="inputs">
+          <div class="form-group mt-1 mb-2">
+            <div class="form-group-header">
+              <label class="color-fg-default text-mono f6" for="input_0"
+                >title</label
+              >
+            </div>
+            <div class="form-group-body">
+              <input
+                class="form-control input-contrast input-sm"
+                type="text"
+                id="input_0"
+                name="inputs[title]"
+                value=""
+              />
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2 required">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_1"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <select
+                class="form-select form-control select-sm input-contrast width-full"
+                id="input_1"
+                required=""
+                name="inputs[platform]"
+                value="DS918+"
+              ></select>
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2 required">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_2"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <select
+                class="form-select form-control select-sm input-contrast width-full"
+                id="input_2"
+                required=""
+                name="inputs[version]"
+                value="7.1.0-42661"
+              ></select>
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_3"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <input
+                class="form-control input-contrast input-sm"
+                type="text"
+                id="input_3"
+                name="inputs[map]"
+                value=""
+              />
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_4"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <input
+                class="form-control input-contrast input-sm"
+                type="text"
+                id="input_4"
+                name="inputs[dtb]"
+                value=""
+              />
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_5"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <input
+                class="form-control input-contrast input-sm"
+                type="text"
+                id="input_5"
+                name="inputs[sn]"
+                value=""
+              />
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_6"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <input
+                class="form-control input-contrast input-sm"
+                type="text"
+                id="input_6"
+                name="inputs[mac]"
+                value=""
+              />
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_7"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <input
+                class="form-control input-contrast input-sm"
+                type="text"
+                id="input_7"
+                name="inputs[usb]"
+                value="0x0001, 0x46f4"
+              />
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_8"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <input
+                class="form-control input-contrast input-sm"
+                type="text"
+                id="input_8"
+                name="inputs[ext]"
+                value=""
+              />
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2 required">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_9"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <select
+                class="form-select form-control select-sm input-contrast width-full"
+                id="input_9"
+                required=""
+                name="inputs[exp]"
+                value="pocopico"
+              ></select>
+            </div>
+          </div>
+          <div class="form-group mt-1 mb-2 required">
+            <div class="form-group-header">
+              <label
+                class="color-fg-default text-mono f6"
+                for="input_10"
+              ></label>
+            </div>
+            <div class="form-group-body">
+              <select
+                class="form-select form-control select-sm input-contrast width-full"
+                id="input_10"
+                required=""
+                name="inputs[jun]"
+                value="0"
+              ></select>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            class="btn btn-primary btn-sm mt-2"
+            onclick="return createIssues()"
+            autofocus=""
+          >
+            创建
+          </button>
+        </form>
+      </div>
+      <br />
+      <div id="content"></div>
+      <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+      <script>
+        httpGetAsync(
+          "https://raw.githubusercontent.com/wjz304/Redpill_CustomBuild/main/tips.md",
+          function (result) {
+            document.getElementById("content").innerHTML = marked.parse(result);
+          }
+        );
+      </script>
+    </div>
+    <footer class="footer width-full container-xl p-responsive">
+      <a
+        aria-label="Homepage"
+        title="GitHub"
+        class="footer-octicon mr-2"
+        href="https://github.com/wjz304"
+      >
+        <img
+          class="avatar rounded-2 avatar-user"
+          src="https://avatars.githubusercontent.com/u/5615843?s=88&amp;v=4"
+          width="40"
+          height="40"
+          alt="@wjz304"
+        />
+      </a>
+      <a
+        aria-label="Homepage"
+        title="GitHub"
+        class="footer-octicon mr-2"
+        href="https://github.com/htmambo"
+      >
+        <img
+          class="avatar rounded-2 avatar-user"
+          src="https://avatars.githubusercontent.com/u/14806317?s=88&amp;v=4"
+          width="40"
+          height="40"
+          alt="@htmambo"
+        />
+      </a>
+      <span> © 2022 wjz304, htmambo, Inc. </span>
+    </footer>
+  </body>
+</html>
