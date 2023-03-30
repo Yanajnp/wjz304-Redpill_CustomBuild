@@ -134,6 +134,17 @@ jobs:
           import os, re, json, shutil, string, requests, subprocess
           def set_output(name, value):
               subprocess.call(["echo '{}={}' >> $GITHUB_ENV".format(name, value)], shell=True)
+          def fullversion(ver):
+              out = ver
+              arr = ver.split('-')
+              if len(arr) > 0:
+                  a = arr[0].split('.')[0] if len(arr[0].split('.')) > 0 else '0'
+                  b = arr[0].split('.')[1] if len(arr[0].split('.')) > 1 else '0'
+                  c = arr[0].split('.')[2] if len(arr[0].split('.')) > 2 else '0'
+                  d = arr[1] if len(arr) > 1 else '00000'
+                  e = arr[2] if len(arr) > 2 else '0'
+                  out = '{}.{}.{}-{}-{}'.format(a,b,c,d,e)
+              return out
           if __name__ == '__main__':
               issues = 'false'
               iscustom = 'true'
@@ -163,6 +174,7 @@ jobs:
               modules = ''
               ext3rds = ''
               dev = '0'
+              paturl = ''
               try:
                   body = {}
                   bodyOriginal = {}
@@ -229,11 +241,11 @@ jobs:
                   models = {}
                   with open('docs/models.json', mode="r", encoding='utf-8') as f:
                       models = json.loads(f.read())
-                  toolchain = {}
-                  with open('docs/toolchain.json', mode="r", encoding='utf-8') as f:
-                      toolchain = json.loads(f.read())
+                  kernelvers = {}
+                  with open('docs/kernelvers.json', mode="r", encoding='utf-8') as f:
+                      kernelvers = json.loads(f.read())
                   PackageArch = [ item["PackageArch"] for item in models if item["Model"] == model ][0]
-                  PackageKVer = [ toolchain[item][PackageArch] for item in toolchain if item[0:3] == version[0:3] ][0]
+                  PackageKVer = kernelvers[PackageArch][version]
                   platform = PackageArch + "-" + PackageKVer
               if iscustom == 'true':
                   lkms = []
@@ -413,10 +425,11 @@ jobs:
                   req.encoding = 'utf-8'
                   gitAddons = json.loads(req.text)
                   curAddons = [ x.strip() for x in re.split(',| |\|', addons) if x.strip() != '' ]
+                  curAddons = list(set(curAddons))
                   extc = [ x for x in curAddons if x not in gitAddons.keys() or (platform not in gitAddons[x]['platforms'] and '_' not in gitAddons[x]['platforms']) ]
                   if len(extc) > 0:
                       iscustom = 'false'
-                      errinfo = 'ext 参数错误, "{}" 无效, addons 当前仅支持 "{}".'.format(extc, ','.join([x for x in curAddons if x in gitAddons.keys() and (platform in gitAddons[x]['platforms'] or '_' in gitAddons[x]['platforms'])]))
+                      errinfo = 'ext 参数错误, "{}" 无效, addons 当前仅支持 "{}".'.format(extc, ','.join([x for x in gitAddons if x in gitAddons.keys() and (platform in gitAddons[x]['platforms'] or '_' in gitAddons[x]['platforms'])]))
                   else:
                       dtbs = ['DS920+', 'DS923+', 'DS1520+', 'DS1621+', 'DS1821+', 'DS2422+', 'DVA1622', 'FS2500', 'SA6400']
                       if model in dtbs:
@@ -446,24 +459,40 @@ jobs:
                   req.encoding = 'utf-8'
                   gitModules = json.loads(req.text)
                   curModules = [ x.strip() for x in re.split(',| |\|', modules) if x.strip() != '' ]
+                  curModules = list(set(curModules))
                   extc = [ x for x in curModules if x not in gitModules.keys() or (platform not in gitModules[x]['platforms'] and '_' not in gitModules[x]['platforms']) ]
                   if len(extc) > 0:
                       iscustom = 'false'
-                      errinfo = 'ext 参数错误, "{}" 无效, modules 当前仅支持 "{}".'.format(extc, ','.join([x for x in curModules if x in gitModules.keys() and (platform in gitModules[x]['platforms'] or '_' in gitModules[x]['platforms'])]))
+                      errinfo = 'ext 参数错误, "{}" 无效, modules 当前仅支持 "{}".'.format(extc, ','.join([x for x in gitModules if x in gitModules.keys() and (platform in gitModules[x]['platforms'] or '_' in gitModules[x]['platforms'])]))
                   else:
                       modules = ','.join(curModules)
               if iscustom == 'true' and ext3rds != '':
-                  ext3rds = [ x.strip() for x in re.split(',| |\|', ext3rds) if x.strip() != '' ]
-                  extc = [ x for x in ext3rds if not x.startswith('http') ]
+                  curExt3rds = [ x.strip() for x in re.split(',| |\|', ext3rds) if x.strip() != '' ]
+                  curExt3rds = list(set(curExt3rds))
+                  extc = [ x for x in curExt3rds if not x.startswith('http') ]
                   if len(extc) > 0:
                       iscustom = 'false'
                       errinfo = 'ext3rds 参数错误, "{}" 无效, ext3rds 当前仅支持 url 地址.'.format(extc)
                   else:
-                      ext3rds = ','.join(ext3rds)
+                      ext3rds = ','.join(curExt3rds)
               if iscustom == 'true' and addons == '' and modules == '' and ext3rds == '':
                   addons = 'boot-wait'   # 当一个 ext 都没有时 /include/file.sh 中 rpt_list_directories 直接 "exit 1"
               if iscustom == 'true' and not dev in ['0', '1']:
                   dev = '0'
+              if iscustom == 'true':
+                  pats = {}
+                  with open('docs/pats.json', 'r') as f:
+                      pats = json.load(f)
+                  tmp = '0.0.0-00000-0'
+                  url = ''
+                  if model in pats.keys():
+                      for item in pats[model]:
+                          ver = fullversion(item)
+                          if version.split('-')[1] not in ver: continue
+                          if ver > tmp:
+                              tmp = ver
+                              url = pats[model][item]
+                  paturl = url
               set_output('issues', issues)
               set_output('iscustom', iscustom)
               set_output('errinfo', errinfo)
@@ -493,6 +522,7 @@ jobs:
               set_output('ext3rds', ext3rds)
               
               set_output('dev', dev)
+              set_output('paturl', paturl)
       - name: Echo Build Info
         run: |
           echo issues:            '${{ env.issues }}'
@@ -523,6 +553,7 @@ jobs:
           echo modules:           '${{ env.modules }}'
           echo ext3rds:           '${{ env.ext3rds }}'
           echo dev:               '${{ env.dev }}'
+          echo paturl:            '${{ env.paturl }}'
       - name: Add Issues labels
         if: env.issues == 'true' && env.iscustom == 'true'
         uses: actions-cool/issues-helper@v3
@@ -690,31 +721,60 @@ jobs:
           function exdsmpat() {
             model=$1
             version=$2
+            paturl=${3:-}
             synomodel=$(echo ${model,,} | sed 's/+/p/g')                                   # DS3622xs+ => ds3622xsp
             synoversion=$(echo ${version} | awk -F - '{print $2}')                         # 7.0.1-42218 => 42218
-            
+            patname=${synomodel}_${synoversion}
             configfile=./config/${model}/${version}/config.json
-            paturl=$(cat ${configfile} | jq -r '.os .pat_url')
+            [ -z "${paturl}" ] && paturl=$(cat ${configfile} | jq -r '.os .pat_url')
             cd ./cache
-            curl -#kL ${paturl} -o ds.pat
-            if [ -f "$GITHUB_WORKSPACE/syno-extractor.sh" ]; then
-              sudo chmod +x $GITHUB_WORKSPACE/syno-extractor.sh && sudo $GITHUB_WORKSPACE/syno-extractor.sh ds.pat pat
+            curl -#kL ${paturl} -o ${patname}.pat
+            header="$(od -bcN2 ${patname}.pat | head -1 | awk '{print $3}')"
+            case ${header} in
+              105)
+                echo "Uncompressed tar"
+                isencrypted="no"
+                ;;
+              213)
+                echo "Compressed tar"
+                isencrypted="no"
+                ;;
+              255)
+                echo "Encrypted"
+                isencrypted="yes"
+                ;;
+              *)
+                echo "error"
+                return 1
+                ;;
+            esac
+            if [ "${isencrypted}" = "yes" ]; then
+              if [ -f "$GITHUB_WORKSPACE/syno-extractor.sh" ]; then
+                sudo chmod +x $GITHUB_WORKSPACE/syno-extractor.sh && sudo $GITHUB_WORKSPACE/syno-extractor.sh ${patname}.pat ${patname}
+              else
+                curl -skL https://raw.githubusercontent.com/wjz304/Redpill_CustomBuild/main/syno-extractor.sh | sudo bash -s ${patname}.pat ${patname}
+              fi
+              rm -f ${patname}.pat
+              tar -czf ${patname}.pat -C ./${patname}/ . --warning=no-file-changed
             else
-              curl -skL https://raw.githubusercontent.com/wjz304/Redpill_CustomBuild/main/syno-extractor.sh | sudo bash -s ds.pat pat
+              mkdir -p "${patname}"
+              tar -xf "${patname}.pat" -C "${patname}" >/dev/null 2>&1
             fi
-            tar -czf ${synomodel}_${synoversion}.pat -C ./pat/ . --warning=no-file-changed
-            sha256newpat=$(sha256sum ${synomodel}_${synoversion}.pat | awk '{print $1}')
-            sha256zImage=$(sha256sum ./pat/zImage | awk '{print $1}')
-            sha256ramdisk=$(sha256sum ./pat/rd.gz | awk '{print $1}')
-            isDT=$([ -f "pat/model.dtb" ] && echo true || echo false)
+            sha256newpat=$(sha256sum ${patname}.pat | awk '{print $1}')
+            sha256zImage=$(sha256sum ./${patname}/zImage | awk '{print $1}')
+            sha256ramdisk=$(sha256sum ./${patname}/rd.gz | awk '{print $1}')
+            isDT=$([ -f "${patname}/model.dtb" ] && echo true || echo false)
             echo sha256newpat: ${sha256newpat}
             echo sha256zImage: ${sha256zImage} 
             echo sha256ramdisk: ${sha256ramdisk}
             echo isDT: ${isDT}
-            sudo rm -rf ds.pat oldpat.tar.gz synoesp pat
+            sudo rm -rf ${patname}
             cd ..
-            jq -r .os.sha256 ${configfile}
-            sed -i "s/$(jq -r .os.sha256 ${configfile})/${sha256newpat}/g" ${configfile}
+            json="$(jq --arg var "${patname}" '.os.id = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
+            json="$(jq --arg var "${paturl}" '.os.pat_url = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
+            json="$(jq --arg var "${sha256newpat}" '.os.sha256 = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
+            json="$(jq --arg var "${sha256zImage}" '.files.zlinux.sha256 = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
+            json="$(jq --arg var "${sha256ramdisk}" '.files.ramdisk.sha256= $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
           }
           function setsynoarch() {
             # jq: error: xxxx/0 is not defined at <top-level> : --arg xxxx "${xxxx}" ' ... $xxxx ...
@@ -758,9 +818,7 @@ jobs:
           synokver=$(echo ${platform} | awk -F - '{print $2}')
           # 7.1 解密PAT
           echo "===========================7.1+ 解密PAT==========================="
-          if [[ "${version}" > "7.0.1-42218" ]]; then 
-            exdsmpat ${model} ${version}
-          fi
+          exdsmpat ${model} ${version} ${{ env.paturl }}
           # redpill.ko
           if [ ! -e ./redpill.ko ]; then
             echo "======================Download redpill.ko============================="
@@ -800,7 +858,8 @@ jobs:
             modinfo ./redpill.ko
           fi
           if [ "SA6400" == "${model}" ]; then
-            curl -skL "https://github.com/wjz304/Redpill_CustomBuild/files/10734770/rp-epyc7002-5.10.55-${lkm}.ko.gz" -o "rp-epyc7002-5.10.55-${lkm}.ko.gz"
+            
+            curl -skL "https://github.com/wjz304/Redpill_CustomBuild/files/`[ "${lkm}" == "dev" ] && echo 10734771 || echo 10734770`/rp-epyc7002-5.10.55-${lkm}.ko.gz" -o "rp-epyc7002-5.10.55-${lkm}.ko.gz"
             gzip -dcv "rp-epyc7002-5.10.55-${lkm}.ko.gz" > "./redpill.ko"
           fi
           modinfo ./redpill.ko
@@ -986,11 +1045,3 @@ jobs:
             >
             ----
           emoji: eyes
-Footer
-© 2023 GitHub, Inc.
-Footer navigation
-Terms
-Privacy
-Security
-Status
-Docs
