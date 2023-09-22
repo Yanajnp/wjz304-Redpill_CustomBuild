@@ -1,4 +1,3 @@
-
 #
 # Copyright (C) 2022 Ing <https://github.com/wjz304>
 # 
@@ -55,33 +54,22 @@ jobs:
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git config --global user.name "github-actions[bot]"
           sudo timedatectl set-timezone "Asia/Shanghai"
+
           python -m pip install --upgrade pip setuptools
           python -m pip install requests
+
       - name: Get Issues Info
         if: github.event_name == 'issues'
         id: get-issues
         uses: actions/github-script@v6
         with:
           script: |
-            // '<???>': 替换一次; '/<???>/g': 替换全局; '/<???>/gi': 替换全局并忽略大小写; 
-            // \u0008 \b Backspace
-            // \u0009 \t Tab
-            // \u000A \n 换行符
-            // \u000B \v 垂直制表符
-            // \u000C \f 换页
-            // \u000D \r 回车
-            // \u0022 \" 双引号 (")
-            // \u0027 \' 单引号 (')
-            // \u005C \\ 反斜杠 (\)
-            // \u00A0    不间断空格
-            // \u2028    行分隔符
-            // \u2029    段落分隔符
-            // \uFEFF    字节顺序标记
             var fs = require('fs'); // 引入fs模块
             var issuenumber = ${{ toJSON(github.event.issue.number) }};
             var issueauth = ${{ toJSON(github.event.issue.user.login) }};
             var issuetitle = ${{ toJSON(github.event.issue.title) }};
             var issuebody = ${{ toJSON(github.event.issue.body) }};
+
             if (issuetitle != null) {
               issuetitle = issuetitle.replace(/\u000A|\u000D/g, "");  // 换行符,回车
             }
@@ -94,6 +82,7 @@ jobs:
               issuebody = issuebody.replace(/：/g, ": ");
               issuebody = issuebody.replace(/，/g, ", ");
               issuebody = issuebody.replace(/“|”/g, "\"");
+
               fs.writeFileSync(`body#${issuenumber}.txt`, issuebody, { 'flag': 'w' }, (err) => { if (err) throw err; });
             
               var regex = /\`\`\`([\s\S]*?)\`\`\`/g;
@@ -112,6 +101,7 @@ jobs:
             core.setOutput("issueauth", JSON.stringify(issueauth));
             core.setOutput("issuetitle", JSON.stringify(issuetitle));
             core.setOutput("issuebody", JSON.stringify(issuebody));
+
       - name: Set Issues Info
         if: github.event_name == 'issues' && success()
         run: |
@@ -119,43 +109,42 @@ jobs:
           echo issueauth:   '${{ steps.get-issues.outputs.issueauth }}'
           echo issuetitle:  '${{ steps.get-issues.outputs.issuetitle }}'
           echo issuebody:   '${{ steps.get-issues.outputs.issuebody }}'
+
           echo "issuenumber="${{ steps.get-issues.outputs.issuenumber }}"" >> $GITHUB_ENV
           echo "issueauth="${{ steps.get-issues.outputs.issueauth }}"" >> $GITHUB_ENV
           echo "issuetitle="${{ steps.get-issues.outputs.issuetitle }}"" >> $GITHUB_ENV
           echo "issuebody="${{ steps.get-issues.outputs.issuebody }}"" >> $GITHUB_ENV
+
           if [ -f 'customshell.sh' ]; then
             echo "customshell.sh"
             cat customshell.sh
           fi
+
       - name: Get Build Info
         shell: python
         run: |
           # -*- coding: utf-8 -*-
           import os, re, json, shutil, string, requests, subprocess
+
           def set_output(name, value):
               subprocess.call(["echo '{}={}' >> $GITHUB_ENV".format(name, value)], shell=True)
-          def fullversion(ver):
-              out = ver
-              arr = ver.split('-')
-              if len(arr) > 0:
-                  a = arr[0].split('.')[0] if len(arr[0].split('.')) > 0 else '0'
-                  b = arr[0].split('.')[1] if len(arr[0].split('.')) > 1 else '0'
-                  c = arr[0].split('.')[2] if len(arr[0].split('.')) > 2 else '0'
-                  d = arr[1] if len(arr) > 1 else '00000'
-                  e = arr[2] if len(arr) > 2 else '0'
-                  out = '{}.{}.{}-{}-{}'.format(a,b,c,d,e)
-              return out
+
+
           if __name__ == '__main__':
+
               issues = 'false'
               iscustom = 'true'
               errinfo = ''
               warinfo = ''
-              repository = ''
+
+              jun = '1'
               model = ''
               version = ''
               platform = ''
               lkm = ''
+
               config = ''
+
               maxdisks = ''
               maxlanport = ''
               internalportcfg = ''
@@ -169,12 +158,15 @@ jobs:
               diskidxmap = ''
               sataportmap = ''
               sasidxmap = ''
+
               dtb = ''
+
               addons = ''
               modules = ''
               ext3rds = ''
+
               dev = '0'
-              paturl = ''
+
               try:
                   body = {}
                   bodyOriginal = {}
@@ -186,18 +178,21 @@ jobs:
                           iscustom = 'false'
                   else:
                       bodyOriginal = json.loads('${{ inputs.body }}')
+
                   for k, v in bodyOriginal.items():
                     body[k.lower()] = v
+
                   if len(body) == 0:
                       iscustom = 'false'
                       errinfo = 'body 错误, body is null'
                   else:
                       # l = lambda x: x.strip() if isinstance(x, str) else str(x)
-                      if 'repository' in body: repository = body['repository'].strip()
+                      if 'jun' in body: jun = body['jun'].strip()
                       if 'model' in body: model = body['model'].strip()
                       if 'version' in body: version = body['version'].strip()
                       # if 'platform' in body: platform = body['platform'].strip()
                       if 'lkm' in body: lkm = body['lkm'].strip()
+
                       if 'config' in body: config = body['config'] #l(body['config']).strip()
                       
                       if 'maxdisks' in body: maxdisks = body['maxdisks'].strip()
@@ -213,50 +208,53 @@ jobs:
                       if 'diskidxmap' in body: diskidxmap = body['diskidxmap'].strip()
                       if 'sataportmap' in body: sataportmap = body['sataportmap'].strip()
                       if 'sasidxmap' in body: sasidxmap = body['sasidxmap'].strip()
+
                       if 'dtb' in body: dtb = body['dtb'].strip()
+
                       if 'addons' in body: addons = body['addons'].strip()
                       if 'modules' in body: modules = body['modules'].strip()
                       if 'ext3rds' in body: ext3rds = body['ext3rds'].strip()
+
               except Exception as e:
                   iscustom = 'false'
                   errinfo = 'body 错误, 不符合JSON规范 {}.'.format(e)
-              loads = {}
-              with open('docs/loads.json', mode="r", encoding='utf-8') as f:
-                  loads = json.loads(f.read())
-              repositorys = loads.keys()
-              if iscustom == 'true' and not repository in repositorys:
+
+              parameter = {}
+              with open('docs/parameter.json', mode="r", encoding='utf-8') as f:
+                  parameter = json.loads(f.read())
+
+              configs = {}
+              req = requests.get('https://raw.githubusercontent.com/wjz304/redpill-load/master/config/configs.json')
+              req.encoding = 'utf-8'
+              configs = json.loads(req.text)
+
+              if iscustom == 'true' and not jun in ['1', '0']:
                   iscustom = 'false'
-                  errinfo = 'repository 参数错误, 当前仅支持 {}.'.format(', '.join(repositorys))
+                  errinfo = 'jun 参数错误, 当前仅支持 {}.'.format(', '.join(['1', '0']))
+
               if iscustom == 'true':
-                  models = loads[repository].keys()
+                  models = list(configs.keys())
                   if not model in models:
                       iscustom = 'false'
                       errinfo = 'model 参数错误, 当前仅支持 {}.'.format(', '.join(models))
+
               if iscustom == 'true':
-                  versions = loads[repository][model]
+                  versions = list(configs[model]["platforms"].keys())
                   if not version in versions:
                       iscustom = 'false'
                       errinfo = 'version 参数错误, 当前仅支持 {}.'.format(', '.join(versions))
+
               if iscustom == 'true':
-                  models = {}
-                  with open('docs/models.json', mode="r", encoding='utf-8') as f:
-                      models = json.loads(f.read())
-                  kernelvers = {}
-                  with open('docs/kernelvers.json', mode="r", encoding='utf-8') as f:
-                      kernelvers = json.loads(f.read())
-                  PackageArch = [ item["PackageArch"] for item in models if item["Model"] == model ][0]
-                  PackageKVer = kernelvers[PackageArch][version]
-                  platform = PackageArch + "-" + PackageKVer
+                  platform = configs[model]["platforms"][version]
+
               if iscustom == 'true':
-                  lkms = []
-                  with open('docs/parameter.json', mode="r", encoding='utf-8') as f:
-                      parameter = json.loads(f.read())
-                      lkms = parameter['lkm']['options']
+                  lkms = parameter['lkm']['options']
                   if lkm == '':
                       lkm = lkms[0]
                   if not lkm in lkms:
                       iscustom = 'false'
                       errinfo = 'lkm 参数错误, 当前仅支持 {}.'.format(', '.join(lkms))
+
               if config != '':
                   try:
                       if isinstance(config, str):
@@ -272,12 +270,15 @@ jobs:
                       if iscustom == 'true':
                           iscustom = 'false'
                           errinfo = 'config 参数错误, 不符合JSON规范 {}.'.format(e)
-              if iscustom == 'true' and maxdisks != '' and (not maxdisks.isdigit() or int(maxdisks) < 1 or int(maxdisks) > 48):
+
+              if iscustom == 'true' and maxdisks != '' and (not maxdisks.isdigit() or int(maxdisks) < 1 or int(maxdisks) > 26):
                   iscustom = 'false'
-                  errinfo = 'maxdisks 参数错误, 请填写 1 - 48 之间的数字.'
-              if iscustom == 'true' and maxlanport != '' and (not maxlanport.isdigit() or int(maxlanport) < 0 or int(maxlanport) > 47):
+                  errinfo = 'maxdisks 参数错误, 请填写 1 - 26 之间的数字.'
+
+              if iscustom == 'true' and maxlanport != '' and (not maxlanport.isdigit() or int(maxlanport) < 1 or int(maxlanport) > 8):
                   iscustom = 'false'
-                  errinfo = 'maxlanport 参数错误, 请填写 0 - 47 之间的数字.'
+                  errinfo = 'maxlanport 参数错误, 请填写 1 - 8 之间的数字.'
+
               if iscustom == 'true' and internalportcfg != '':
                   if len(internalportcfg) > 2 and internalportcfg[:2].lower().startswith('0x') and all(c in string.hexdigits for c in internalportcfg[2:]):
                       pass
@@ -286,6 +287,7 @@ jobs:
                   else:
                       iscustom = 'false'
                       errinfo = 'internalportcfg 参数错误, 请填写十六进制数.'
+
               if iscustom == 'true' and esataportcfg != '':
                   if len(esataportcfg) > 2 and esataportcfg[:2].lower().startswith('0x') and all(c in string.hexdigits for c in esataportcfg[2:]):
                       pass
@@ -294,6 +296,7 @@ jobs:
                   else:
                       iscustom = 'false'
                       errinfo = 'esataportcfg 参数错误, 请填写十六进制数.'
+
               if iscustom == 'true' and usbportcfg != '':
                   if len(usbportcfg) > 2 and usbportcfg[:2].lower().startswith('0x') and all(c in string.hexdigits for c in usbportcfg[2:]):
                       pass
@@ -302,12 +305,14 @@ jobs:
                   else:
                       iscustom = 'false'
                       errinfo = 'usbportcfg 参数错误, 请填写十六进制数.'
+
               if iscustom == 'true' and sn != '':
                   warinfo = 'sn'
                   if not sn.isalnum():
                       iscustom = 'false'
                       errinfo = 'sn 参数错误.'
                       warinfo = 'sn'
+
               if iscustom == 'true' and mac != '':
                   warinfo = 'mac' if warinfo == '' else 'sn, mac'
                   macs = [x.strip() for x in re.split(',| |\|', mac) if x.strip() != '']
@@ -316,12 +321,15 @@ jobs:
                   else:
                       iscustom = 'false'
                       errinfo = 'mac 参数错误.'
+
               if iscustom == 'true' and netif_num != '' and (not netif_num.isdigit() or int(netif_num) < 1 or int(netif_num) > 8):
                   iscustom = 'false'
                   errinfo = 'netif_num 参数错误, 请填写 1 - 8 之间的数字.'
+
               if iscustom == 'true' and mac != '' and netif_num != '' and int(netif_num) != len(mac.split(',')):
                   iscustom = 'false'
                   errinfo = 'netif_num 应该与 mac 的个数相等, 请填写匹配的数值.'
+
               if iscustom == 'true' and vid != '':
                   if len(vid) == 6 and vid.lower().startswith('0x') and all(c in string.hexdigits for c in vid[2:]):
                       pass
@@ -330,6 +338,7 @@ jobs:
                   else:
                       iscustom = 'false'
                       errinfo = 'vid 参数错误, 请填写十六进制数.'
+
               if iscustom == 'true' and pid != '':
                   if len(pid) == 6 and pid.lower().startswith('0x') and all(c in string.hexdigits for c in pid[2:]):
                       pass
@@ -338,9 +347,11 @@ jobs:
                   else:
                       iscustom = 'false'
                       errinfo = 'pid 参数错误, 请填写十六进制数.'
+
               if iscustom == 'true' and ((vid != '' and pid == '') or (vid == '' and pid != '')):
                   iscustom = 'false'
                   errinfo = 'vid 和 pid 参数不可单独定制, 应成对出现, 请填写完整的两个参数.'
+
               if iscustom == 'true' and diskidxmap != '' and not all(c in string.hexdigits for c in diskidxmap):
                   iscustom = 'false'
                   errinfo = 'diskidxmap 参数错误, 请填写十六进制数..'
@@ -352,74 +363,98 @@ jobs:
               if iscustom == 'true' and sasidxmap != '' and not sasidxmap.isdigit():
                   iscustom = 'false'
                   errinfo = 'sasidxmap 参数错误, 请填写数字.'
+
               #if iscustom == 'true' and ((diskidxmap != '' and sataportmap == '') or (diskidxmap == '' and sataportmap != '') or len(diskidxmap) < len(sataportmap)):
               #    iscustom = 'false'
               #    errinfo = 'diskidxmap 和 sataportmap 参数不可单独定制, 且 diskidxmap的位数应该为sataportmap位数的2倍.'
-              if iscustom == 'true' and dtb != '': # and dtb != 'auto':
-                  url = dtb
-                  try:
+
+              dtbs = [ model for model in configs.keys() if configs[model]["dt"] == True ]
+              if iscustom == 'true':
+                  if model not in dtbs and dtb == '':
+                      if addons != '':
+                        addons += ',disks'
+                      else:
+                          addons += 'disks'
+                  elif model not in dtbs and dtb != '':
+                      iscustom = 'false'
+                      errinfo = 'dtb 参数错误, "{}" 不需要 "dtb".'.format(model)
+                  elif model in dtbs and dtb == '':
+                      if not 'disks' in addons:
+                          if addons != '':
+                              addons += ',disks'
+                          else:
+                              addons += 'disks'
+                  elif model in dtbs and dtb != '': # and dtb != 'auto':
+                      url = dtb
                       try:
-                          import wget, filetype
-                      except ModuleNotFoundError:
-                          os.system('pip3 install wget filetype')
-                          import wget, filetype
-                  
-                      res = wget.download(url)
-                      if res:
-                          down = res
-                          kind = filetype.guess(down)
-                          name = 'user'
-                          if os.path.exists('extract'):  
-                              shutil.rmtree('extract')
-                          if kind != None and kind.extension == 'zip':
-                              import zipfile
-                              z = zipfile.ZipFile(down, 'r')
-                              z.extractall('extract')
-                          if kind != None and kind.extension in ['tar', 'gz']:
-                              import tarfile
-                              z = tarfile.open(down) 
-                              z.extractall('extract')
-                          if os.path.exists('extract'):
-                              isfind = False
-                              for root, dirs, files in os.walk('extract'):
-                                  for file in files:
-                                      if file.endswith('.dts') or file.endswith('.dtb'):
-                                          isfind = True
-                                          down = name + os.path.splitext(file)[-1]
-                                          shutil.move(os.path.join(root, file), down)
+                          try:
+                              import wget, filetype
+                          except ModuleNotFoundError:
+                              os.system('pip3 install wget filetype')
+                              import wget, filetype
+                      
+                          res = wget.download(url)
+                          if res:
+                              down = res
+                              kind = filetype.guess(down)
+                              name = 'user'
+                              if os.path.exists('extract'):  
+                                  shutil.rmtree('extract')
+                              if kind != None and kind.extension == 'zip':
+                                  import zipfile
+                                  z = zipfile.ZipFile(down, 'r')
+                                  z.extractall('extract')
+                              if kind != None and kind.extension in ['tar', 'gz']:
+                                  import tarfile
+                                  z = tarfile.open(down) 
+                                  z.extractall('extract')
+                              if os.path.exists('extract'):
+                                  isfind = False
+                                  for root, dirs, files in os.walk('extract'):
+                                      for file in files:
+                                          if file.endswith('.dts') or file.endswith('.dtb'):
+                                              isfind = True
+                                              down = name + os.path.splitext(file)[-1]
+                                              shutil.move(os.path.join(root, file), down)
+                                              break
+                                      if isfind is True:
                                           break
-                                  if isfind is True:
-                                      break
-                          if os.path.exists(down) and (down.endswith('dts') or down.endswith('dtb')):
-                              if down.endswith('dts'):
-                                  wget.download('https://raw.githubusercontent.com/pocopico/rp-ext/main/redpill-dtb-static/releases/dtc')
-                                  if os.path.exists('dtc'):
-                                      print('./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
-                                      os.system('sudo chmod a+x dtc')
-                                      # os.system('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
-                                      p = subprocess.Popen('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name), shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                                      errinfo = p.stderr.read().decode('utf-8')
-                                      if os.path.exists('{}.dtb'.format(name)) and os.path.getsize('{}.dtb'.format(name)) > 0:
-                                          print('dtc ok ...')
-                                          dtb = os.path.abspath('{}.dtb'.format(name))
+
+                              if os.path.exists(down) and (down.endswith('dts') or down.endswith('dtb')):
+                                  if down.endswith('dts'):
+                                      wget.download('https://raw.githubusercontent.com/pocopico/rp-ext/main/redpill-dtb-static/releases/dtc')
+                                      if os.path.exists('dtc'):
+                                          print('./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
+                                          os.system('sudo chmod a+x dtc')
+                                          # os.system('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
+                                          p = subprocess.Popen('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name), shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                                          errinfo = p.stderr.read().decode('utf-8')
+                                          if os.path.exists('{}.dtb'.format(name)) and os.path.getsize('{}.dtb'.format(name)) > 0:
+                                              print('dtc ok ...')
+                                              dtb = os.path.abspath('{}.dtb'.format(name))
+                                          else:
+                                              iscustom = 'false'
+                                              errinfo = 'dtb 参数错误, dts文件内容存在错误 <{}>.'.format(errinfo.replace('\r', '').replace('\n', ' '))
                                       else:
                                           iscustom = 'false'
-                                          errinfo = 'dtb 参数错误, dts文件内容存在错误 <{}>.'.format(errinfo.
-                                          lace('\r', '').replace('\n', ' '))
+                                          errinfo = 'dtb 参数错误, 下载 dtc(dts->dtb tools) 失败, 可能是服务器压力过大, 请稍后重试, 或者直接使用 dtb 文件跳过转换.'
                                   else:
-                                      iscustom = 'false'
-                                      errinfo = 'dtb 参数错误, 下载 dtc(dts->dtb tools) 失败, 可能是服务器压力过大, 请稍后重试, 或者直接使用 dtb 文件跳过转换.'
+                                      dtb = os.path.abspath(down)
+                                  if not 'dtbstatic' in addons:
+                                      if addons != '':
+                                          addons += ',dtbstatic'
+                                      else:
+                                          addons += 'dtbstatic'
                               else:
-                                  dtb = os.path.abspath(down)
-                          else:
-                              iscustom = 'false'
-                              errinfo = 'dtb 参数错误, 该url下载的文件不是所支持的格式.'
-                  except ValueError as e:
-                      iscustom = 'false'
-                      errinfo = 'dtb 参数错误, {}, 请填写 dts/dtb 文件有效的 http(s) 下载链接.'.format(e)
-                  except Exception as e:
-                      iscustom = 'false'
-                      errinfo = 'dtb 参数错误, {}, 请稍后重试.'.format(e)
+                                  iscustom = 'false'
+                                  errinfo = 'dtb 参数错误, 该url下载的文件不是所支持的格式.'
+                      except ValueError as e:
+                          iscustom = 'false'
+                          errinfo = 'dtb 参数错误, {}, 请填写 dts/dtb 文件有效的 http(s) 下载链接.'.format(e)
+                      except Exception as e:
+                          iscustom = 'false'
+                          errinfo = 'dtb 参数错误, {}, 请稍后重试.'.format(e)
+
               if iscustom == 'true' and addons != '':
                   req = requests.get('https://raw.githubusercontent.com/wjz304/rp-ext/main/addons.json')
                   req.encoding = 'utf-8'
@@ -431,29 +466,17 @@ jobs:
                       iscustom = 'false'
                       errinfo = 'ext 参数错误, "{}" 无效, addons 当前仅支持 "{}".'.format(extc, ','.join([x for x in gitAddons if x in gitAddons.keys() and (platform in gitAddons[x]['platforms'] or '_' in gitAddons[x]['platforms'])]))
                   else:
-                      dtbs = ['DS920+', 'DS923+', 'DS1520+', 'DS1621+', 'DS1821+', 'DS2422+', 'DVA1622', 'FS2500', 'SA6400']
-                      if model in dtbs:
-                          if dtb == '':
-                              if 'dtbstatic' in curAddons:
-                                  iscustom = 'false'
-                                  errinfo = 'addons 参数错误, "dtbstatic" 无效, dtbstatic 依赖自定义的 dtb 文件.'
-                              elif 'disks' in curAddons and 'dtbpatch' in curAddons:
-                                  iscustom = 'false'
-                                  errinfo = 'addons 参数错误, "disks" 和 "dtbpatch" 只能选一个.'
-                              elif 'disks' not in curAddons and 'dtbpatch' not in curAddons:
-                                  curAddons.append('disks')
-                          else:
-                              if 'disks' in curAddons or 'dtbpatch' in curAddons:
-                                  iscustom = 'false'
-                                  errinfo = 'addons 参数错误, "disks / dtbpatch" 无效, 自定义 dtb 文件时只能选 "dtbstatic".'
-                              elif 'dtbstatic' not in curAddons:
-                                  curAddons.append('dtbstatic')
+                      if dtb == '' and 'dtbstatic' in curAddons:
+                          iscustom = 'false'
+                          errinfo = 'addons 参数错误, "dtbstatic" 无效, dtbstatic 依赖自定义的 dtb 文件.'
+                      elif dtb != '' and 'disks' in curAddons:
+                          iscustom = 'false'
+                          errinfo = 'addons 参数错误, "disks" 无效, 自定义 dtb 文件时只能选 "dtbstatic".'
                       else:
-                          if 'dtbstatic' in curAddons or 'disks' in curAddons or 'dtbpatch' in curAddons:
-                              iscustom = 'false'
-                              errinfo = 'addons 参数错误, "dtbstatic / disks / dtbpatch" 无效, "{}" 不需要 "dtb".'.format(model)
+                          pass
                       if iscustom == 'true' and addons != '':
                           addons = ','.join(curAddons)
+
               if iscustom == 'true' and modules != '':
                   req = requests.get('https://raw.githubusercontent.com/wjz304/rp-ext/main/modules.json')
                   req.encoding = 'utf-8'
@@ -466,6 +489,7 @@ jobs:
                       errinfo = 'ext 参数错误, "{}" 无效, modules 当前仅支持 "{}".'.format(extc, ','.join([x for x in gitModules if x in gitModules.keys() and (platform in gitModules[x]['platforms'] or '_' in gitModules[x]['platforms'])]))
                   else:
                       modules = ','.join(curModules)
+
               if iscustom == 'true' and ext3rds != '':
                   curExt3rds = [ x.strip() for x in re.split(',| |\|', ext3rds) if x.strip() != '' ]
                   curExt3rds = list(set(curExt3rds))
@@ -475,33 +499,24 @@ jobs:
                       errinfo = 'ext3rds 参数错误, "{}" 无效, ext3rds 当前仅支持 url 地址.'.format(extc)
                   else:
                       ext3rds = ','.join(curExt3rds)
+
               if iscustom == 'true' and addons == '' and modules == '' and ext3rds == '':
                   addons = 'boot-wait'   # 当一个 ext 都没有时 /include/file.sh 中 rpt_list_directories 直接 "exit 1"
+
               if iscustom == 'true' and not dev in ['0', '1']:
                   dev = '0'
-              if iscustom == 'true':
-                  pats = {}
-                  with open('docs/pats.json', 'r') as f:
-                      pats = json.load(f)
-                  tmp = '0.0.0-00000-0'
-                  url = ''
-                  if model in pats.keys():
-                      for item in pats[model]:
-                          ver = fullversion(item)
-                          if version.split('-')[1] not in ver: continue
-                          if ver > tmp:
-                              tmp = ver
-                              url = pats[model][item]
-                  paturl = url
+
               set_output('issues', issues)
               set_output('iscustom', iscustom)
               set_output('errinfo', errinfo)
               set_output('warinfo', warinfo)
-              set_output('repository', repository)
+
+              set_output('jun', jun)
               set_output('model', model)
               set_output('version', version)
               set_output('platform', platform)
               set_output('lkm', lkm)
+
               set_output('config', config)
               set_output('maxdisks', maxdisks)
               set_output('maxlanport', maxlanport)
@@ -517,24 +532,28 @@ jobs:
               set_output('sataportmap', sataportmap)
               set_output('sasidxmap', sasidxmap)
               set_output('dtb', dtb)
+
               set_output('addons', addons)
               set_output('modules', modules)
               set_output('ext3rds', ext3rds)
               
               set_output('dev', dev)
-              set_output('paturl', paturl)
+
       - name: Echo Build Info
         run: |
           echo issues:            '${{ env.issues }}'
           echo iscustom:          '${{ env.iscustom }}'
           echo errinfo:           '${{ env.errinfo }}'
           echo warinfo:           '${{ env.warinfo }}'
-          echo repository:        '${{ env.repository }}'
+
+          echo jun:               '${{ env.jun }}'
           echo model:             '${{ env.model }}'
           echo version:           '${{ env.version }}'
           echo platform:          '${{ env.platform }}'
           echo lkm:               '${{ env.lkm }}'
+
           echo config:            '${{ env.config }}'
+
           echo maxdisks:          '${{ env.maxdisks }}'
           echo maxlanport:        '${{ env.maxlanport }}'
           echo internalportcfg:   '${{ env.internalportcfg }}'
@@ -553,7 +572,8 @@ jobs:
           echo modules:           '${{ env.modules }}'
           echo ext3rds:           '${{ env.ext3rds }}'
           echo dev:               '${{ env.dev }}'
-          echo paturl:            '${{ env.paturl }}'
+
+
       - name: Add Issues labels
         if: env.issues == 'true' && env.iscustom == 'true'
         uses: actions-cool/issues-helper@v3
@@ -629,11 +649,12 @@ jobs:
             ----
           emoji: eyes
 
-      - name: Create Config File
+      - name: Create User Config File
         if: env.iscustom == 'true'
         shell: python
         run: |
           import os, json
+
           if __name__ == '__main__':
               config = {
                   "extra_cmdline": {
@@ -643,28 +664,33 @@ jobs:
                       "mac1": ""
                   },
                   "synoinfo": {
-                      "internalportcfg": "0xffff",
                       "maxlanport": "7"
                   },
                   "ramdisk_copy": {}
               }
+
               dat = []
               if '${{ env.sn }}' == '' or '${{ env.mac }}' == '':
                   model = '${{ env.model }}'
                   dat = os.popen('bash ./serialnumbergen.sh {}'.format(model)).readlines()
+
               if '${{ env.config }}' != '':
                   inconfig = json.loads('${{ env.config }}')
                   config.update(inconfig)
+
               if not "extra_cmdline" in config:
                   config["extra_cmdline"] = {}
+
               if '${{ env.vid }}' != '':
                   config["extra_cmdline"]["vid"] = '${{ env.vid }}'
               if '${{ env.pid }}' != '':
                   config["extra_cmdline"]["pid"] = '${{ env.pid }}'
+
               if '${{ env.sn }}' != '':
                   config["extra_cmdline"]["sn"] = '${{ env.sn }}'
               if config["extra_cmdline"]["sn"] == '' and len(dat) == 2:
                   config["extra_cmdline"]["sn"] = dat[1].strip()
+
               if '${{ env.mac }}' != '':
                   macs = '${{ env.mac }}'.split(',')
                   for index, item in enumerate(macs):
@@ -678,14 +704,18 @@ jobs:
                       for index in range(netnum):
                           config["extra_cmdline"]["mac{}".format(index+1)] = hex(int(dat[0].strip().replace(':', ''), 16) + index)[2:].rjust(12,'0').upper()
                       config["extra_cmdline"]["netif_num"] = netnum
+
               if '${{ env.diskidxmap }}' != '':
                   config["extra_cmdline"]["DiskIdxMap"] = '${{ env.diskidxmap }}'
               if '${{ env.sataportmap }}' != '':
                   config["extra_cmdline"]["SataPortMap"] = '${{ env.sataportmap }}'
               if '${{ env.sasidxmap }}' != '':
                   config["extra_cmdline"]["SasIdxMap"] = '${{ env.sasidxmap }}'
+
+
               if not "synoinfo" in config:
                   config["synoinfo"] = {}
+
               if '${{ env.maxdisks }}' != '':
                   config["synoinfo"]["maxdisks"] = '${{ env.maxdisks }}'
               if '${{ env.maxlanport }}' != '':
@@ -696,129 +726,57 @@ jobs:
                   config["synoinfo"]["esataportcfg"] = '${{ env.esataportcfg }}'
               if '${{ env.usbportcfg }}' != '':
                   config["synoinfo"]["usbportcfg"] = '${{ env.usbportcfg }}'
+
               print(json.dumps(config, indent=4))
+
               with open('user_config.json', 'w', encoding="utf-8") as f:
                   f.write(json.dumps(config, indent=4))
+
+
       - name: Run Build
         if: env.iscustom == 'true' && success()
         run: |
           # 累了, 毁灭吧
-          #
-          # # curl 参数说明
-          # -f, --fail              连接失败时不显示HTTP错误信息 (H)
-          # -k, --insecure          允许连接到 SSL 站点，而不使用证书 (H)
-          # -L, --location          跟踪重定向 (H)
-          # -o, --output FILE       将输出写入文件，而非 stdout
-          # -O, --remote-name       将输出写入远程文件
-          # -S, --show-error        显示错误. 在选项 -s 中，当 curl 出现错误时将显示
-          # -s, --silent            Silent模式。不输出任务内容
-          # -w, --write-out FORMAT  完成后输出什么
-          # -#/--progress-bar	      用进度条显示当前的传送状态
+
           sudo apt update
           #sudo apt upgrade -y
           sudo apt install bspatch jq -y    # curl 新版有毛病
           sudo apt install rename tree -y   # typo 依赖
-          function exdsmpat() {
-            model=$1
-            version=$2
-            paturl=${3:-}
-            synomodel=$(echo ${model,,} | sed 's/+/p/g')                                   # DS3622xs+ => ds3622xsp
-            synoversion=$(echo ${version} | awk -F - '{print $2}')                         # 7.0.1-42218 => 42218
-            patname=${synomodel}_${synoversion}
-            configfile=./config/${model}/${version}/config.json
-            [ -z "${paturl}" ] && paturl=$(cat ${configfile} | jq -r '.os .pat_url')
-            cd ./cache
-            curl -#kL ${paturl} -o ${patname}.pat
-            header="$(od -bcN2 ${patname}.pat | head -1 | awk '{print $3}')"
-            case ${header} in
-              105)
-                echo "Uncompressed tar"
-                isencrypted="no"
-                ;;
-              213)
-                echo "Compressed tar"
-                isencrypted="no"
-                ;;
-              255)
-                echo "Encrypted"
-                isencrypted="yes"
-                ;;
-              *)
-                echo "error"
-                return 1
-                ;;
-            esac
-            if [ "${isencrypted}" = "yes" ]; then
-              if [ -f "$GITHUB_WORKSPACE/syno-extractor.sh" ]; then
-                sudo chmod +x $GITHUB_WORKSPACE/syno-extractor.sh && sudo $GITHUB_WORKSPACE/syno-extractor.sh ${patname}.pat ${patname}
-              else
-                curl -skL https://raw.githubusercontent.com/wjz304/Redpill_CustomBuild/main/syno-extractor.sh | sudo bash -s ${patname}.pat ${patname}
-              fi
-              rm -f ${patname}.pat
-              tar -czf ${patname}.pat -C ./${patname}/ . --warning=no-file-changed
-            else
-              mkdir -p "${patname}"
-              tar -xf "${patname}.pat" -C "${patname}" >/dev/null 2>&1
-            fi
-            sha256newpat=$(sha256sum ${patname}.pat | awk '{print $1}')
-            sha256zImage=$(sha256sum ./${patname}/zImage | awk '{print $1}')
-            sha256ramdisk=$(sha256sum ./${patname}/rd.gz | awk '{print $1}')
-            isDT=$([ -f "${patname}/model.dtb" ] && echo true || echo false)
-            echo sha256newpat: ${sha256newpat}
-            echo sha256zImage: ${sha256zImage} 
-            echo sha256ramdisk: ${sha256ramdisk}
-            echo isDT: ${isDT}
-            sudo rm -rf ${patname}
-            cd ..
-            json="$(jq --arg var "${patname}" '.os.id = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
-            json="$(jq --arg var "${paturl}" '.os.pat_url = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
-            json="$(jq --arg var "${sha256newpat}" '.os.sha256 = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
-            json="$(jq --arg var "${sha256zImage}" '.files.zlinux.sha256 = $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
-            json="$(jq --arg var "${sha256ramdisk}" '.files.ramdisk.sha256= $var' ${configfile})" && echo -E "${json}" | jq . >${configfile}
-          }
-          function setsynoarch() {
-            # jq: error: xxxx/0 is not defined at <top-level> : --arg xxxx "${xxxx}" ' ... $xxxx ...
-            if [ -f "$GITHUB_WORKSPACE/docs/models.json" ]; then
-              synoarch=$(jq -r --arg model "$1" '. | map(select(.Model == $model)) | .[].PackageArch' $GITHUB_WORKSPACE/docs/models.json)
-            else
-              synoarch=$(curl -skL https://raw.githubusercontent.com/wjz304/Redpill_CustomBuild/main/docs/models.json | jq -r --arg model "$1" '. | map(select(.Model == $model)) | .[].PackageArch')
-            fi
-            synoarch=${synoarch,,}
-            echo ${synoarch}
-          }
+
+
           # 开始表演
           echo "============================编译开始============================"
-          repository=${{ env.repository }}
-          repo=$(echo ${repository} | awk -F'_' '{print $1}')
-          branch=$(echo ${repository} | awk -F'_' '{print $2}')
+          jun=${{ env.jun }}
           lkm=${{ env.lkm }}
-          bArgs="BRP_DEBUG=1 "
-          if [ ${repository} != 'pocopico_develop' -a ${repository} != 'wjz304_test-dev' ]; then 
-            bArgs+='BRP_JUN_MOD=1 '
-          fi
-          git clone -b ${branch} https://github.com/${repo}/redpill-load redpill-load
-          # # submodule
-          # [ -d redpill-load/ext/recreate-zImage ] && rm -rf redpill-load/ext/recreate-zImage
-          # git clone -b master https://github.com/kiler129/recreate-zImage.git redpill-load/ext/recreate-zImage
-          # sudo chmod -R a+x redpill-load/ext
-          # find redpill-load/ext -type f -name '*.sh' -exec ls -al '{}' +
-          #容错
-          echo "============================↓ 容错 ↓============================="
-          # curl -skL https://raw.githubusercontent.com/wjz304/Redpill_CustomBuild/main/typo.sh | bash -s ${repo} ${branch} redpill-load
-          chmod a+x $GITHUB_WORKSPACE/typo.sh && $GITHUB_WORKSPACE/typo.sh ${repo} ${branch} redpill-load
-          echo "============================↑ 容错 ↑============================="
-          cp user_config.json redpill-load/user_config.json
-          cd redpill-load
           model=${{ env.model }}
           version=${{ env.version }}
           platform=${{ env.platform }}
           synomodel=$(echo ${model,,} | sed 's/+/p/g')                                   # DS3622xs+ => ds3622xsp
           synoversion=$(echo ${version} | awk -F - '{print $2}')                         # 7.0.1-42218 => 42218
-          synoarch=$(echo ${platform} | awk -F - '{print $1}')
-          synokver=$(echo ${platform} | awk -F - '{print $2}')
-          # 7.1 解密PAT
-          echo "===========================7.1+ 解密PAT==========================="
-          exdsmpat ${model} ${version} ${{ env.paturl }}
+
+          bArgs="BRP_DEBUG=1 "
+          if [ "${jun}" == "1" ]; then 
+            bArgs+="BRP_JUN_MOD=1 "
+          fi
+
+          repo=wjz304
+          branch=main
+          git clone -b ${branch} https://github.com/${repo}/redpill-load redpill-load
+
+          # # submodule
+          # [ -d redpill-load/ext/recreate-zImage ] && rm -rf redpill-load/ext/recreate-zImage
+          # git clone -b master https://github.com/kiler129/recreate-zImage.git redpill-load/ext/recreate-zImage
+          # sudo chmod -R a+x redpill-load/ext
+
+          cp user_config.json redpill-load/user_config.json
+
+          cd redpill-load
+
+          # make config
+          sudo pip install -r requirements.txt
+          sudo python syno.py ${model} ${version} ${jun}
+          cat config/${model}/${version}/config.json
+
           # redpill.ko
           if [ ! -e ./redpill.ko ]; then
             echo "======================Download redpill.ko============================="
@@ -829,82 +787,78 @@ jobs:
               gzip -dcv "rp-${platform}-${lkm}.ko.gz" > "./redpill.ko" || true
             fi
           fi
-          if [ ! -e ./redpill.ko ]; then
-            # echo "===========================Arpl redpill.ko==========================="
-            # TAG=`curl -skL https://api.github.com/repos/fbelavenuto/redpill-lkm/releases/latest | grep "tag_name" | awk '{print substr($2, 2, length($2)-3)}'`
-            # curl -#kL "https://github.com/fbelavenuto/redpill-lkm/releases/download/${TAG}/rp-lkms.zip" -o ./rp-lkms.zip
-            # [ -f ./rp-lkms.zip ] && unzip ./rp-lkms.zip -d ./rp-lkms >/dev/null || true
-            # [ -d ./rp-lkms ] && for file in ./rp-lkms/*; do [ "$(echo ${file} | grep ${platform}-${lkm})" != "" ] && gzip -dcv "${file}" > "./redpill.ko" || echo "${file}: No"; done
-            if [ -f ./redpill.ko ]; then
-              echo "====================Docker Build redpill.ko==========================="
-              [ ${{ env.dev }} == '1' ] && lkmrepo="fbelavenuto" || lkmrepo="pocopico"
-              git clone --recursive https://github.com/${lkmrepo}/redpill-lkm.git redpill-lkm
-              mkdir redpill-lkm-output && chmod -R 777 redpill-lkm-output
-              TOOLKIT_VER="latest"  # "7.1"  # "latest"
-              sudo docker run -u 1000 --rm -t -v "${PWD}/redpill-lkm":/input -v "${PWD}/redpill-lkm-output":/output fbelavenuto/syno-compiler:${TOOLKIT_VER} compile-lkm ${synoarch}
-              cp -fv ./redpill-lkm-output/redpill-${lkm}.ko ./redpill.ko || true
-            fi
-          fi
-          if [ ! -e ./redpill.ko ]; then
-            echo "===========================Build redpill.ko==========================="
-            toolkittxz=ds.${synoarch}-${version::3}.dev.txz
-            toolkitdir=usr/local/x86_64-pc-linux-gnu/x86_64-pc-linux-gnu/sys-root/usr/lib/modules/DSM-${version::3}/build
-            curl -skL "https://global.download.synology.com/download/ToolChain/toolkit/${version::3}/${synoarch}/${toolkittxz}" -o ${toolkittxz}
-            mkdir ${synoarch} && tar -C./${synoarch}/ -xf ${toolkittxz} ${toolkitdir}
-            git clone -b master --depth=1 https://github.com/${repo}/redpill-lkm.git
-            cd redpill-lkm
-            # sed -i 's/   -std=gnu89/   -std=gnu89 -fno-pie/' ../${synoarch}/${toolkitdir}/Makefile
-            make LINUX_SRC=../${synoarch}/${toolkitdir} dev-v${version::1}
-            modinfo ./redpill.ko
-          fi
-          if [ "SA6400" == "${model}" ]; then
-            
-            curl -skL "https://github.com/wjz304/Redpill_CustomBuild/files/`[ "${lkm}" == "dev" ] && echo 10734771 || echo 10734770`/rp-epyc7002-5.10.55-${lkm}.ko.gz" -o "rp-epyc7002-5.10.55-${lkm}.ko.gz"
-            gzip -dcv "rp-epyc7002-5.10.55-${lkm}.ko.gz" > "./redpill.ko"
-          fi
+
           modinfo ./redpill.ko
           RPKOVER=$(modinfo --field=vermagic ./redpill.ko | awk '{print $1}')
           cp -fv ./redpill.ko ./ext/rp-lkm/redpill-linux-v${RPKOVER}.ko
-          sudo chmod -R +x ./ext/rp-lkm
+          sudo chmod -R a+x ./ext/rp-lkm
+
           RPKOOLD=`echo $(grep "@@@EXT@@@/rp-lkm" ./config/${model}/${version}/config.json | sed -r 's|"@@@EXT@@@/(.*)":(.*)|\1|')`  # `echo $P` 去首尾空格
           if [ ! "${RPKOOLD}" == "rp-lkm/redpill-linux-v${RPKOVER}.ko" ]; then
             echo "change ./config/${model}/${version}/config.json from ${RPKOOLD} to rp-lkm/redpill-linux-v${RPKOVER}.ko"
-            sed -i "s|${RPKOOLD}|rp-lkm/redpill-linux-v${RPKOVER}.ko|" ./config/${model}/${version}/config.json
+            sudo sed -i "s|${RPKOOLD}|rp-lkm/redpill-linux-v${RPKOVER}.ko|" ./config/${model}/${version}/config.json
           fi
+
           rpext=https://raw.githubusercontent.com/wjz304/rp-ext/master
+
           # 添加 addons
           echo "===========================添加 addons ==========================="
           if [ -n "${{ env.addons }}" ]; then
             ext=${{ env.addons }}
             exts=(${ext//,/ })
-            for item in ${exts[@]}
-            do
+            for item in ${exts[@]}; do
               echo "addons ==> [${item}]"
-              ./ext-manager.sh add "${rpext}/addons/${item}/rpext-index.json"
+              if [ "dtbstatic" == "${item}" -a -n "${{ env.dtb }}" ]; then
+                echo "loacl dtbstatic ..."
+                EXT_PATH="`./ext/dtbstatic/make.sh "${{ env.dtb }}"`"
+                if [ -n "${EXT_PATH}" ]; then 
+                  echo "EXT_PATH: ${EXT_PATH}"
+                  ./ext-manager.sh add "${EXT_PATH}"
+                else
+                  echo "loacl dtbstatic error"
+                  exit 1
+                fi 
+              elif [ "localrss" == "${item}" ]; then
+                echo "loacl localrss ..."
+
+                paturl=$(cat config/${model}/${version}/config.json | jq -r '.os .pat_url')
+                patmd5=$(cat config/${model}/${version}/config.json | jq -r '.os .hash')
+                EXT_PATH="`./ext/localrss/make.sh "${paturl}" "${patmd5}"`"
+                if [ -n "${EXT_PATH}" ]; then 
+                  echo "EXT_PATH: ${EXT_PATH}"
+                  ./ext-manager.sh add "${EXT_PATH}"
+                else
+                  echo "loacl localrss error"
+                  exit 1
+                fi 
+              else
+                ./ext-manager.sh add "${rpext}/addons/${item}/rpext-index.json"
+              fi
             done
           fi
+
           # 添加 modules
           echo "===========================添加modules ==========================="
           if [ -n "${{ env.modules }}" ]; then
             ext=${{ env.modules }}
             exts=(${ext//,/ })
-            for item in ${exts[@]}
-            do
+            for item in ${exts[@]}; do
               echo "modules ==> [${item}]"
               ./ext-manager.sh add "${rpext}/modules/${item}/rpext-index.json"
             done
           fi
+
           # 添加扩展驱动
           echo "===========================添加ext3rds ==========================="
           if [ -n "${{ env.ext3rds }}" ]; then
             ext=${{ env.ext3rds }}
             exts=(${ext//,/ })
-            for item in ${exts[@]}
-            do
+            for item in ${exts[@]}; do
               echo "ext3rds ==> [${item}]"
               ./ext-manager.sh add "${item}"
             done
           fi
+
           #自定义操作
           if [ -f '../customshell.sh' ]; then
             if [ "${{ env.issueauth }}" == "${{ github.repository_owner }}" -o "${{ github.triggering_actor }}" == "${{ github.repository_owner }}" ]; then
@@ -916,20 +870,25 @@ jobs:
               echo "由于权限太高, 防止有些人执行非法操作, 仅仓库作者可操作, 请联系该仓库管理员或者fork到自己名下操作."
             fi
           fi
+
           # 空间
           echo "==============================空间=============================="
           df -h
+
           # 编译
           echo "==============================编译=============================="
           # sed -i "s|#!/usr/bin/env bash|#!/usr/bin/env -S bash -x|g" ./build-loader.sh
-          sudo ${bArgs} BRP_USER_CFG=user_config.json BRP_PLATFORM_KERNELVERSION=${platform} ./build-loader.sh "${model}" "${version}"
+          sudo ${bArgs} BRP_USER_CFG=user_config.json BRP_PLATFORM_KVER=${platform} ./build-loader.sh "${model}" "${version}"
+
           ls ./custom/extensions | grep -v txt > exts.txt
           ls -al ./custom/extensions
+
       - name: Generate release tag
         if: env.iscustom == 'true' && success()
         id: tag
         run: |
           echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_ENV
+
           if [ ${{ env.issues }} == 'true' ]; then
             echo "### ${{ env.issueauth }}'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
             echo "👉 issues: [#${{ env.issuenumber }}](${{ github.event.issue.html_url }})" >> $GITHUB_STEP_SUMMARY
@@ -938,21 +897,26 @@ jobs:
             echo "👉 "model": "${{ env.model }}"  " >> $GITHUB_STEP_SUMMARY
             echo "👉 "version": "${{ env.version }}"  " >> $GITHUB_STEP_SUMMARY
           fi
+
           if [ '${{ env.warinfo }}' != '' ]; then
             echo "  " >> $GITHUB_STEP_SUMMARY
             echo "‼️‼️‼️  " >> $GITHUB_STEP_SUMMARY
             echo 'Body 中含有自定义的 ${{ env.warinfo }} 敏感信息, 为防止其他人盗用, 建议附件下载完成后删除日志和附件.  ' >> $GITHUB_STEP_SUMMARY
             echo '在👉Issues下评论 "delete builds" 即可删该Issues的所有历史编译记录.  ' >> $GITHUB_STEP_SUMMARY
           fi
+
           if [ -f 'body#${{ env.issuenumber }}.txt' ]; then
             cp body#${{ env.issuenumber }}.txt redpill-load/body#${{ env.issuenumber }}.txt
             echo -e "\n\nBOOT:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> redpill-load/body#${{ env.issuenumber }}.txt
           else
             echo -e "BOOT:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> redpill-load/body#actions.txt
           fi
+
           configfile=./redpill-load/config/${{ env.model }}/${{ env.version }}/config.json
           paturl=$(cat ${configfile} | jq -r '.os .pat_url')
+
           echo -e "\nPAT:\n${paturl}" >> redpill-load/body#${{ env.issuenumber }}.txt
+
       - name: Upload to Artifacts
         if: env.iscustom == 'true' && success()
         uses: actions/upload-artifact@v3
@@ -963,6 +927,7 @@ jobs:
             redpill-load/body*.txt
             redpill-load/user_config.json
             redpill-load/images/*.img
+
       - name: Generate release tag
         if: env.iscustom == 'false'
         run: |
@@ -981,6 +946,8 @@ jobs:
             echo 'Body 中含有自定义的 ${{ env.warinfo }} 敏感信息, 为防止其他人盗用, 建议确认错误原因后删除日志和附件.  ' >> $GITHUB_STEP_SUMMARY
             echo '在👉Issues下评论 "delete builds" 即可删👉Issues的所有历史编译记录.  ' >> $GITHUB_STEP_SUMMARY
           fi
+
+
       - name: Update Comment Finish
         if: env.issues == 'true' && env.iscustom == 'true' && success()
         uses: actions-cool/issues-helper@v3
