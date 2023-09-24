@@ -6,1009 +6,382 @@
 #
 
 
-name: Custom Redpill
+# 默认情况下，使用存储库的GITHUB_TOKEN执行任务时，GITHUB_TOKEN触发的事件不会创建新的工作流运行。这可以防止意外创建递归工作流运行。
+# 可以通过个人TOKEN在工作流运行中触发工作流。
+# 1. 在 https://github.com/settings/tokens 创建 一个 token
+# 2. 在 https://github.com/${{ github.repository }}/settings/secrets/actions 加入上一步创建的 token
+
+
+
+name: Custom Redpill(schedule)
+
 on:
-  issues:
-    types: [opened, reopened]
+  issue_comment:
+    types: [created, edited, deleted]
+
+  schedule:
+    - cron: '0 0 * * *'
+
   workflow_dispatch:
-    inputs:
-      body: 
-        description: 'issuss body'
-        required: true
-        default: ''
-        type: string
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Checkout
-        uses: actions/checkout@main
+#  dump:
+#    runs-on: ubuntu-latest
+#    steps:
+#      - name: Dump GitHub context
+#        id: github_context_step
+#        run: echo '${{ toJSON(github) }}'
+#      - name: Dump job context
+#        run: echo '${{ toJSON(job) }}'
+#      - name: Dump steps context
+#        run: echo '${{ toJSON(steps) }}'
+#      - name: Dump runner context
+#        run: echo '${{ toJSON(runner) }}'
+#      - name: Dump strategy context
+#        run: echo '${{ toJSON(strategy) }}'
+#      - name: Dump matrix context
+#        run: echo '${{ toJSON(matrix) }}'
 
-      - name: Create Issues comment
-        if: github.event_name == 'issues'
-        id: comment
+# https://docs.github.com/cn/actions/learn-github-actions/expressions
+
+  transfer:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment' && contains('transfer', github.event.comment.body)
+    steps:
+      - name: Find runs comments
+        id: find-runs
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-comments'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          comment-auth: 'github-actions[bot]'
+          body-includes: '${{ github.server_url }}/${{ github.repository }}/actions/runs'
+
+      - name: Downloads Artifacts
+        id: dl-artifacts
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var fs = require('fs');
+            async function main() {
+                var runscomments = ${{ steps.find-runs.outputs.comments }};
+                console.log("runscomments: " + runscomments);
+
+                var runids = [];
+                for (i = 0; i < runscomments.length; i++) {
+                    bodylines = runscomments.at(i)["body"].split("\n")
+                    for (j = 0; j < bodylines.length; j++) {
+                        if (bodylines.at(j).indexOf("runs/") != -1) {
+                            let runid = bodylines.at(j).substring(bodylines.at(j).lastIndexOf('/') + 1).replace(/^\s+|\s+$/g, '');
+                            runids.push({"id": runscomments.at(i)["id"], "runid": runid});
+                        }
+                    }
+                }
+                console.log("runids: " + runids);
+
+                // https://docs.github.com/cn/rest/actions/workflow-runs#delete-workflow-run-logs
+                // https://github.com/octokit/plugin-rest-endpoint-methods.js/blob/master/src/generated/endpoints.ts
+
+                var downloadeds = [];
+                const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+                if (runids.length > 0) {
+                    for (index = 0; index < runids.length; index++) {
+                        try {
+                            if (false == downloadeds.includes(runids.at(index)["runid"])) {
+                                // 获取附件
+                                const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                                    owner, 
+                                    repo,
+                                    run_id: runids.at(index)["runid"],
+                                    per_page: 100,
+                                });
+                                console.log("artifacts: %s", artifacts.data);
+                                if (artifacts.data.total_count > 0) {
+                                    // 下载附件 (正常只有一个)
+                                    for (const artifact of artifacts.data.artifacts) {
+                                        console.log(`artifact id ${artifact.id} of ${artifact.name}`)
+                                        const dlartifact = await github.rest.actions.downloadArtifact({
+                                            owner, 
+                                            repo,
+                                            artifact_id: artifact.id,
+                                            archive_format: 'zip',
+                                        });
+                                        console.log(`GET artifacts(${artifact.id}): ${dlartifact}`)
+                                        fs.mkdirSync(`${runids.at(index)["runid"]}`, {recursive:true}, (err)=>{ if(err){ throw err; }});
+                                        fs.writeFileSync(`${runids.at(index)["runid"]}/${artifact.name}.zip`, Buffer.from(dlartifact.data), (err)=>{ if(err){ throw err; }});
+                                    }
+                                    downloadeds.push(runids.at(index)["runid"]);
+                                }
+                            }
+                        } catch (error) {
+                            core.setFailed(error.message);
+                        }
+                    }
+                }
+                var dirs = '';
+                dirs = downloadeds.join(",");
+                core.setOutput("downloadeds", dirs);
+            }
+            main();
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Transfer Artifacts
+        run: |
+          # curl -sL https://git.io/file-transfer | sh 
+          # ./transfer trs *.zip
+
+          echo 'info<<EOF' >> $GITHUB_ENV
+          if [ -n "${{ steps.dl-artifacts.outputs.downloadeds }}" ]; then
+            dls=${{ steps.dl-artifacts.outputs.downloadeds }}
+            ids=(${dls//,/ })
+            for item in ${ids[@]}
+            do
+              files=""
+              if [ -d ${item} ]; then
+                for file in `ls ${item}`
+                do
+                  files="${files} -F filedata=@${item}/${file}"
+                done
+              fi
+              echo "### ${item}:  " >> $GITHUB_ENV
+              if [ -n "${files}" ]; then
+                url=$(curl -w '\n' -i ${files} "https://transfer.sh" | sed 's/\r//g; /^$/d')
+                echo "- ${url}  " >> $GITHUB_ENV
+              else
+                echo "- delete  " >> $GITHUB_ENV
+              fi
+            done
+          else
+            echo '未找到编译成功的附件, 如果编译失败或者已删除(delete builds)请重新编译后再执行本操作.  ' >> $GITHUB_ENV
+          fi
+          echo 'EOF' >> $GITHUB_ENV
+    
+      - name: Create Issues Comment
         uses: actions-cool/issues-helper@v3
         with:
           actions: 'create-comment'
           token: ${{ secrets.GITHUB_TOKEN }}
           issue-number: ${{ github.event.issue.number }}
-          body: | 
-            分析 title 和 body 内容 ..  
-            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
-            ----
-          emoji: heart
+          body: '${{ env.info }}'
+          emoji: rocket
 
-      - name: Set up Ruby 3
-        uses: ruby/setup-ruby@v1
+
+  delete_builds:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment' && contains('delete builds', github.event.comment.body)
+    steps:
+
+      - name: Find bots comments
+        id: find-bots
+        uses: actions-cool/issues-helper@v3
         with:
-          ruby-version: 3.1.2
+          actions: 'find-comments'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          comment-auth: 'github-actions[bot]'
 
-      - name: Set up Python 3
-        uses: actions/setup-python@v4
+      - name: Find runs comments
+        id: find-runs
+        uses: actions-cool/issues-helper@v3
         with:
-          python-version: '3.10'
+          actions: 'find-comments'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          comment-auth: 'github-actions[bot]'
+          body-includes: '${{ github.server_url }}/${{ github.repository }}/actions/runs'
 
-      - name: Init Env
-        run : |
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git config --global user.name "github-actions[bot]"
-          sudo timedatectl set-timezone "Asia/Shanghai"
+      - name: Delete build Data
+        id: delete-build
+        uses: actions/github-script@v6
+        with:
+          script: |
+            async function main() {
 
-          python -m pip install --upgrade pip setuptools
-          python -m pip install requests
+                var botscomments = ${{ steps.find-bots.outputs.comments }};
+                console.log("botscomments: " + botscomments);
+
+                var runscomments = ${{ steps.find-runs.outputs.comments }};
+                console.log("runscomments: " + runscomments);
+                
+                var botids = [];
+                for (i = 0; i < botscomments.length; i++) {
+                    botids.push(botscomments.at(i)["id"]);
+                }
+                console.log("botids: " + botids);
+
+                var runids = [];
+                for (i = 0; i < runscomments.length; i++) {
+                    bodylines = runscomments.at(i)["body"].split("\n")
+                    for (j = 0; j < bodylines.length; j++) {
+                        if (bodylines.at(j).indexOf("runs/") != -1) {
+                            let runid = bodylines.at(j).substring(bodylines.at(j).lastIndexOf('/') + 1).replace(/^\s+|\s+$/g, '');
+                            runids.push({"id": runscomments.at(i)["id"], "runid": runid});
+                        }
+                    }
+                }
+                console.log("runids: " + runids);
+
+                // https://docs.github.com/cn/rest/actions/workflow-runs#delete-workflow-run-logs
+                // https://github.com/octokit/plugin-rest-endpoint-methods.js/blob/master/src/generated/endpoints.ts
+
+                const [owner, repo] = process.env.GITHUB_REPOSITORY.split("/");
+                if (runids.length > 0) {
+                    var deleted = [];
+                    for (index = 0; index < runids.length; index++) {
+                        try {
+                            if (false == deleted.includes(runids.at(index)["runid"])) {
+                                // 删除日志
+                                const dellogs = await github.rest.actions.deleteWorkflowRunLogs({
+                                    owner, 
+                                    repo,
+                                    run_id: runids.at(index)["runid"],
+                                });
+                                console.log("DELETE logs: %s", dellogs);
+
+                                // 获取附件
+                                const artifacts = await github.rest.actions.listWorkflowRunArtifacts({
+                                    owner, 
+                                    repo,
+                                    run_id: runids.at(index)["runid"],
+                                    per_page: 100,
+                                });
+                                console.log("artifacts: %s", artifacts.data);
+                            
+                                // 删除附件
+                                for (const artifact of artifacts.data.artifacts) {
+                                    console.log(`artifact id ${artifact.id} of ${artifact.name}`)
+                                    const delartifacts = await github.rest.actions.deleteArtifact({
+                                        owner, 
+                                        repo,
+                                        artifact_id: artifact.id,
+                                    });
+                                    console.log(`DELETE artifacts(${artifact.id}): ${delartifacts}`)
+                                }
+                                deleted.push(runids.at(index)["runid"]);
+                            }
+                        } catch (error) {
+                            core.setFailed(error.message);
+                        }
+                    }
+                }
+
+                if (botids.length > 0) {
+                    for (index = 0; index < botids.length; index++) {
+                        try {
+                            // 更新评论
+                            const retcomments = await github.rest.issues.updateComment({
+                                owner, 
+                                repo,
+                                comment_id: botids.at(index),
+                                body: '`delete`'
+                            })
+                            console.log("PATCH emoji: %s", retcomments);
+                        } catch (error) {
+                            core.setFailed(error.message);
+                        }
+                    }
+                }
+            }
+            main();
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  set_schedule:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'issue_comment' && contains(fromJson('["add schedule", "del schedule"]'), github.event.comment.body)
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Check Labels
+        id: check-comments
+        uses: actions/github-script@v6
+        with:
+          script: |
+            var labels = [];
+            var issuelabels = ${{ toJSON(github.event.issue.labels) }};
+            console.log("issuelabels: " + issuelabels);
+            for (i in issuelabels) {
+                labels.push(issuelabels[i]["name"]);
+            }
+            console.log("labels: " + labels);
+
+            var isSchedule = "false";
+            if (${{ toJSON(github.event.comment.body) }}.toLowerCase() == "add schedule") {
+                isSchedule = "true";
+            }
+            console.log("isSchedule: " + isSchedule);
+
+            if (isSchedule == "true") {
+                labels.push("schedule");
+            } else {
+                var index = labels.indexOf("schedule");
+                if (index > -1) labels.splice(index, 1);
+            }
+
+            core.setOutput("isSchedule", isSchedule);
+            core.setOutput("labels", labels.join(","));
+
+      - name: Set labels
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'set-labels'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-number: ${{ github.event.issue.number }}
+          labels: ${{ steps.check-comments.outputs.labels }}
+
+
+  checklabels:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Find schedule issues
+        id: find-issues
+        uses: actions-cool/issues-helper@v3
+        with:
+          actions: 'find-issues'
+          token: ${{ secrets.GITHUB_TOKEN }}
+          issue-state: 'all'
+          #title-includes: 'custom'
+          labels: 'schedule'
 
       - name: Get Issues Info
-        if: github.event_name == 'issues'
         id: get-issues
         uses: actions/github-script@v6
         with:
           script: |
-            var fs = require('fs'); // 引入fs模块
-            var issuenumber = ${{ toJSON(github.event.issue.number) }};
-            var issueauth = ${{ toJSON(github.event.issue.user.login) }};
-            var issuetitle = ${{ toJSON(github.event.issue.title) }};
-            var issuebody = ${{ toJSON(github.event.issue.body) }};
+            var issues = ${{ toJSON(steps.find-issues.outputs.issues) }};
+            // Backspace,Tab,换行符,垂直制表符,换页,回车,不间断空格,行分隔符,段落分隔符,字节顺序标记
+            issues = issues.replace(/\u0008|\u0009|\u000A|\u000B|\u000C|\u000D|\u00A0|\u2028|\u2029|\uFEFF/g, "");
+            core.setOutput("issues", JSON.stringify(issues));
 
-            if (issuetitle != null) {
-              issuetitle = issuetitle.replace(/\u000A|\u000D/g, "");  // 换行符,回车
-            }
-            
-            if (issuebody != null) {
-              // Backspace,Tab,垂直制表符,换页,回车,不间断空格,行分隔符,段落分隔符,字节顺序标记
-              issuebody = issuebody.replace(/\u0008|\u0009|\u000B|\u000C|\u000D|\u00A0|\u2028|\u2029|\uFEFF/g, "");
-              
-              // 容错
-              issuebody = issuebody.replace(/：/g, ": ");
-              issuebody = issuebody.replace(/，/g, ", ");
-              issuebody = issuebody.replace(/“|”/g, "\"");
-
-              fs.writeFileSync(`body#${issuenumber}.txt`, issuebody, { 'flag': 'w' }, (err) => { if (err) throw err; });
-            
-              var regex = /\`\`\`([\s\S]*?)\`\`\`/g;
-              let options = issuebody.match(regex);
-              if (options != null && options.length > 0) {
-                fs.writeFileSync('customshell.sh', options[options.length-1].replace(/\`/g, ""), { 'flag': 'w' }, (err) => { if (err) throw err; });
-                for(option in options) {
-                  console.log(options[option]);
-                  issuebody = issuebody.replace(options[option], "");
-                }
-              }
-              // 换行符
-              issuebody = issuebody.replace(/\u000A/g, "");
-            }
-            core.setOutput("issuenumber", JSON.stringify(issuenumber));
-            core.setOutput("issueauth", JSON.stringify(issueauth));
-            core.setOutput("issuetitle", JSON.stringify(issuetitle));
-            core.setOutput("issuebody", JSON.stringify(issuebody));
-
-      - name: Set Issues Info
-        if: github.event_name == 'issues' && success()
-        run: |
-          echo issuenumber: '${{ steps.get-issues.outputs.issuenumber }}'
-          echo issueauth:   '${{ steps.get-issues.outputs.issueauth }}'
-          echo issuetitle:  '${{ steps.get-issues.outputs.issuetitle }}'
-          echo issuebody:   '${{ steps.get-issues.outputs.issuebody }}'
-
-          echo "issuenumber="${{ steps.get-issues.outputs.issuenumber }}"" >> $GITHUB_ENV
-          echo "issueauth="${{ steps.get-issues.outputs.issueauth }}"" >> $GITHUB_ENV
-          echo "issuetitle="${{ steps.get-issues.outputs.issuetitle }}"" >> $GITHUB_ENV
-          echo "issuebody="${{ steps.get-issues.outputs.issuebody }}"" >> $GITHUB_ENV
-
-          if [ -f 'customshell.sh' ]; then
-            echo "customshell.sh"
-            cat customshell.sh
-          fi
-
-      - name: Get Build Info
+      - name: Reopen Issues
         shell: python
         run: |
-          # -*- coding: utf-8 -*-
-          import os, re, json, shutil, string, requests, subprocess
-
-          def set_output(name, value):
-              subprocess.call(["echo '{}={}' >> $GITHUB_ENV".format(name, value)], shell=True)
-
+          import os, json, requests
 
           if __name__ == '__main__':
-
-              issues = 'false'
-              iscustom = 'true'
-              errinfo = ''
-              warinfo = ''
-
-              jun = '1'
-              model = ''
-              version = ''
-              platform = ''
-              lkm = ''
-
-              config = ''
-
-              maxdisks = ''
-              maxlanport = ''
-              internalportcfg = ''
-              esataportcfg = ''
-              usbportcfg = ''
-              sn = ''
-              mac = ''
-              netif_num = ''
-              vid = ''
-              pid = ''
-              diskidxmap = ''
-              sataportmap = ''
-              sasidxmap = ''
-
-              dtb = ''
-
-              addons = ''
-              modules = ''
-              ext3rds = ''
-
-              dev = '0'
 
               try:
-                  body = {}
-                  bodyOriginal = {}
-                  if '${{ github.event_name }}' == 'issues':
-                      if '${{ env.issuetitle }}'.lower().startswith('custom'):
-                          issues = 'true'
-                          bodyOriginal = json.loads('${{ env.issuebody }}')
-                      else:
-                          iscustom = 'false'
-                  else:
-                      bodyOriginal = json.loads('${{ inputs.body }}')
+                  issues = {}
+                  issues = json.loads(${{ steps.get-issues.outputs.issues }})
 
-                  for k, v in bodyOriginal.items():
-                    body[k.lower()] = v
-
-                  if len(body) == 0:
-                      iscustom = 'false'
-                      errinfo = 'body 错误, body is null'
-                  else:
-                      # l = lambda x: x.strip() if isinstance(x, str) else str(x)
-                      if 'jun' in body: jun = body['jun'].strip()
-                      if 'model' in body: model = body['model'].strip()
-                      if 'version' in body: version = body['version'].strip()
-                      # if 'platform' in body: platform = body['platform'].strip()
-                      if 'lkm' in body: lkm = body['lkm'].strip()
-
-                      if 'config' in body: config = body['config'] #l(body['config']).strip()
-                      
-                      if 'maxdisks' in body: maxdisks = body['maxdisks'].strip()
-                      if 'maxlanport' in body: maxlanport = body['maxlanport'].strip()
-                      if 'internalportcfg' in body: internalportcfg = body['internalportcfg'].strip()
-                      if 'esataportcfg' in body: esataportcfg = body['esataportcfg'].strip()
-                      if 'usbportcfg' in body: usbportcfg = body['usbportcfg'].strip()
-                      #if 'sn' in body: sn = body['sn'].strip()
-                      #if 'mac' in body: mac = body['mac'].strip()
-                      if 'netif_num' in body: netif_num = body['netif_num'].strip()
-                      if 'vid' in body: vid = body['vid'].strip()
-                      if 'pid' in body: pid = body['pid'].strip()
-                      if 'diskidxmap' in body: diskidxmap = body['diskidxmap'].strip()
-                      if 'sataportmap' in body: sataportmap = body['sataportmap'].strip()
-                      if 'sasidxmap' in body: sasidxmap = body['sasidxmap'].strip()
-
-                      if 'dtb' in body: dtb = body['dtb'].strip()
-
-                      if 'addons' in body: addons = body['addons'].strip()
-                      if 'modules' in body: modules = body['modules'].strip()
-                      if 'ext3rds' in body: ext3rds = body['ext3rds'].strip()
-
-              except Exception as e:
-                  iscustom = 'false'
-                  errinfo = 'body 错误, 不符合JSON规范 {}.'.format(e)
-
-              parameter = {}
-              with open('docs/parameter.json', mode="r", encoding='utf-8') as f:
-                  parameter = json.loads(f.read())
-
-              configs = {}
-              req = requests.get('https://raw.githubusercontent.com/wjz304/redpill-load/master/config/configs.json')
-              req.encoding = 'utf-8'
-              configs = json.loads(req.text)
-
-              if iscustom == 'true' and not jun in ['1', '0']:
-                  iscustom = 'false'
-                  errinfo = 'jun 参数错误, 当前仅支持 {}.'.format(', '.join(['1', '0']))
-
-              if iscustom == 'true':
-                  models = list(configs.keys())
-                  if not model in models:
-                      iscustom = 'false'
-                      errinfo = 'model 参数错误, 当前仅支持 {}.'.format(', '.join(models))
-
-              if iscustom == 'true':
-                  versions = list(configs[model]["platforms"].keys())
-                  if not version in versions:
-                      iscustom = 'false'
-                      errinfo = 'version 参数错误, 当前仅支持 {}.'.format(', '.join(versions))
-
-              if iscustom == 'true':
-                  platform = configs[model]["platforms"][version]
-
-              if iscustom == 'true':
-                  lkms = parameter['lkm']['options']
-                  if lkm == '':
-                      lkm = lkms[0]
-                  if not lkm in lkms:
-                      iscustom = 'false'
-                      errinfo = 'lkm 参数错误, 当前仅支持 {}.'.format(', '.join(lkms))
-
-              if config != '':
-                  try:
-                      if isinstance(config, str):
-                          config = json.loads(config)
-                      if isinstance(config, dict):
-                          config = json.dumps(config)
-                          json.loads(config)
-                      else:
-                          if iscustom == 'true':
-                              iscustom = 'false'
-                              errinfo = 'config 参数错误, 不符合JSON规范.'
-                  except Exception as e:
-                      if iscustom == 'true':
-                          iscustom = 'false'
-                          errinfo = 'config 参数错误, 不符合JSON规范 {}.'.format(e)
-
-              if iscustom == 'true' and maxdisks != '' and (not maxdisks.isdigit() or int(maxdisks) < 1 or int(maxdisks) > 26):
-                  iscustom = 'false'
-                  errinfo = 'maxdisks 参数错误, 请填写 1 - 26 之间的数字.'
-
-              if iscustom == 'true' and maxlanport != '' and (not maxlanport.isdigit() or int(maxlanport) < 1 or int(maxlanport) > 8):
-                  iscustom = 'false'
-                  errinfo = 'maxlanport 参数错误, 请填写 1 - 8 之间的数字.'
-
-              if iscustom == 'true' and internalportcfg != '':
-                  if len(internalportcfg) > 2 and internalportcfg[:2].lower().startswith('0x') and all(c in string.hexdigits for c in internalportcfg[2:]):
-                      pass
-                  elif all(c in string.hexdigits for c in internalportcfg):
-                      internalportcfg = '0x' + internalportcfg
-                  else:
-                      iscustom = 'false'
-                      errinfo = 'internalportcfg 参数错误, 请填写十六进制数.'
-
-              if iscustom == 'true' and esataportcfg != '':
-                  if len(esataportcfg) > 2 and esataportcfg[:2].lower().startswith('0x') and all(c in string.hexdigits for c in esataportcfg[2:]):
-                      pass
-                  elif all(c in string.hexdigits for c in esataportcfg):
-                      esataportcfg = '0x' + esataportcfg
-                  else:
-                      iscustom = 'false'
-                      errinfo = 'esataportcfg 参数错误, 请填写十六进制数.'
-
-              if iscustom == 'true' and usbportcfg != '':
-                  if len(usbportcfg) > 2 and usbportcfg[:2].lower().startswith('0x') and all(c in string.hexdigits for c in usbportcfg[2:]):
-                      pass
-                  elif all(c in string.hexdigits for c in usbportcfg):
-                      usbportcfg = '0x' + usbportcfg
-                  else:
-                      iscustom = 'false'
-                      errinfo = 'usbportcfg 参数错误, 请填写十六进制数.'
-
-              if iscustom == 'true' and sn != '':
-                  warinfo = 'sn'
-                  if not sn.isalnum():
-                      iscustom = 'false'
-                      errinfo = 'sn 参数错误.'
-                      warinfo = 'sn'
-
-              if iscustom == 'true' and mac != '':
-                  warinfo = 'mac' if warinfo == '' else 'sn, mac'
-                  macs = [x.strip() for x in re.split(',| |\|', mac) if x.strip() != '']
-                  if len(macs) > 0 or len(macs) <= 8:
-                      mac = ','.join(macs)
-                  else:
-                      iscustom = 'false'
-                      errinfo = 'mac 参数错误.'
-
-              if iscustom == 'true' and netif_num != '' and (not netif_num.isdigit() or int(netif_num) < 1 or int(netif_num) > 8):
-                  iscustom = 'false'
-                  errinfo = 'netif_num 参数错误, 请填写 1 - 8 之间的数字.'
-
-              if iscustom == 'true' and mac != '' and netif_num != '' and int(netif_num) != len(mac.split(',')):
-                  iscustom = 'false'
-                  errinfo = 'netif_num 应该与 mac 的个数相等, 请填写匹配的数值.'
-
-              if iscustom == 'true' and vid != '':
-                  if len(vid) == 6 and vid.lower().startswith('0x') and all(c in string.hexdigits for c in vid[2:]):
-                      pass
-                  elif len(vid) == 4 and all(c in string.hexdigits for c in vid):
-                      vid = '0x' + vid
-                  else:
-                      iscustom = 'false'
-                      errinfo = 'vid 参数错误, 请填写十六进制数.'
-
-              if iscustom == 'true' and pid != '':
-                  if len(pid) == 6 and pid.lower().startswith('0x') and all(c in string.hexdigits for c in pid[2:]):
-                      pass
-                  elif len(pid) == 4 and all(c in string.hexdigits for c in pid):
-                      pid = '0x' + pid
-                  else:
-                      iscustom = 'false'
-                      errinfo = 'pid 参数错误, 请填写十六进制数.'
-
-              if iscustom == 'true' and ((vid != '' and pid == '') or (vid == '' and pid != '')):
-                  iscustom = 'false'
-                  errinfo = 'vid 和 pid 参数不可单独定制, 应成对出现, 请填写完整的两个参数.'
-
-              if iscustom == 'true' and diskidxmap != '' and not all(c in string.hexdigits for c in diskidxmap):
-                  iscustom = 'false'
-                  errinfo = 'diskidxmap 参数错误, 请填写十六进制数..'
-              
-              if iscustom == 'true' and sataportmap != '' and not sataportmap.isdigit():
-                  iscustom = 'false'
-                  errinfo = 'sataportmap 参数错误, 请填写数字.'
-              
-              if iscustom == 'true' and sasidxmap != '' and not sasidxmap.isdigit():
-                  iscustom = 'false'
-                  errinfo = 'sasidxmap 参数错误, 请填写数字.'
-
-              #if iscustom == 'true' and ((diskidxmap != '' and sataportmap == '') or (diskidxmap == '' and sataportmap != '') or len(diskidxmap) < len(sataportmap)):
-              #    iscustom = 'false'
-              #    errinfo = 'diskidxmap 和 sataportmap 参数不可单独定制, 且 diskidxmap的位数应该为sataportmap位数的2倍.'
-
-              dtbs = [ model for model in configs.keys() if configs[model]["dt"] == True ]
-              if iscustom == 'true':
-                  if model not in dtbs and dtb == '':
-                      if addons != '':
-                        addons += ',disks'
-                      else:
-                          addons += 'disks'
-                  elif model not in dtbs and dtb != '':
-                      iscustom = 'false'
-                      errinfo = 'dtb 参数错误, "{}" 不需要 "dtb".'.format(model)
-                  elif model in dtbs and dtb == '':
-                      if not 'disks' in addons:
-                          if addons != '':
-                              addons += ',disks'
-                          else:
-                              addons += 'disks'
-                  elif model in dtbs and dtb != '': # and dtb != 'auto':
-                      url = dtb
-                      try:
+                  if len(issues) > 0:
+                      headers = {'Accept': 'application/vnd.github+json', 'Authorization': 'token ${{ secrets.ACTION }}'}
+                      data = '{"state": "open"}'
+                      for item in issues:
                           try:
-                              import wget, filetype
-                          except ModuleNotFoundError:
-                              os.system('pip3 install wget filetype')
-                              import wget, filetype
-                      
-                          res = wget.download(url)
-                          if res:
-                              down = res
-                              kind = filetype.guess(down)
-                              name = 'user'
-                              if os.path.exists('extract'):  
-                                  shutil.rmtree('extract')
-                              if kind != None and kind.extension == 'zip':
-                                  import zipfile
-                                  z = zipfile.ZipFile(down, 'r')
-                                  z.extractall('extract')
-                              if kind != None and kind.extension in ['tar', 'gz']:
-                                  import tarfile
-                                  z = tarfile.open(down) 
-                                  z.extractall('extract')
-                              if os.path.exists('extract'):
-                                  isfind = False
-                                  for root, dirs, files in os.walk('extract'):
-                                      for file in files:
-                                          if file.endswith('.dts') or file.endswith('.dtb'):
-                                              isfind = True
-                                              down = name + os.path.splitext(file)[-1]
-                                              shutil.move(os.path.join(root, file), down)
-                                              break
-                                      if isfind is True:
-                                          break
-
-                              if os.path.exists(down) and (down.endswith('dts') or down.endswith('dtb')):
-                                  if down.endswith('dts'):
-                                      wget.download('https://raw.githubusercontent.com/pocopico/rp-ext/main/redpill-dtb-static/releases/dtc')
-                                      if os.path.exists('dtc'):
-                                          print('./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
-                                          os.system('sudo chmod a+x dtc')
-                                          # os.system('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name))
-                                          p = subprocess.Popen('sudo ./dtc -q -I dts -O dtb {} >{}.dtb'.format(down, name), shell=True, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                                          errinfo = p.stderr.read().decode('utf-8')
-                                          if os.path.exists('{}.dtb'.format(name)) and os.path.getsize('{}.dtb'.format(name)) > 0:
-                                              print('dtc ok ...')
-                                              dtb = os.path.abspath('{}.dtb'.format(name))
-                                          else:
-                                              iscustom = 'false'
-                                              errinfo = 'dtb 参数错误, dts文件内容存在错误 <{}>.'.format(errinfo.replace('\r', '').replace('\n', ' '))
-                                      else:
-                                          iscustom = 'false'
-                                          errinfo = 'dtb 参数错误, 下载 dtc(dts->dtb tools) 失败, 可能是服务器压力过大, 请稍后重试, 或者直接使用 dtb 文件跳过转换.'
-                                  else:
-                                      dtb = os.path.abspath(down)
-                                  if not 'dtbstatic' in addons:
-                                      if addons != '':
-                                          addons += ',dtbstatic'
-                                      else:
-                                          addons += 'dtbstatic'
-                              else:
-                                  iscustom = 'false'
-                                  errinfo = 'dtb 参数错误, 该url下载的文件不是所支持的格式.'
-                      except ValueError as e:
-                          iscustom = 'false'
-                          errinfo = 'dtb 参数错误, {}, 请填写 dts/dtb 文件有效的 http(s) 下载链接.'.format(e)
-                      except Exception as e:
-                          iscustom = 'false'
-                          errinfo = 'dtb 参数错误, {}, 请稍后重试.'.format(e)
-
-              if iscustom == 'true' and addons != '':
-                  req = requests.get('https://raw.githubusercontent.com/wjz304/rp-ext/main/addons.json')
-                  req.encoding = 'utf-8'
-                  gitAddons = json.loads(req.text)
-                  curAddons = [ x.strip() for x in re.split(',| |\|', addons) if x.strip() != '' ]
-                  curAddons = list(set(curAddons))
-                  extc = [ x for x in curAddons if x not in gitAddons.keys() or (platform not in gitAddons[x]['platforms'] and '_' not in gitAddons[x]['platforms']) ]
-                  if len(extc) > 0:
-                      iscustom = 'false'
-                      errinfo = 'ext 参数错误, "{}" 无效, addons 当前仅支持 "{}".'.format(extc, ','.join([x for x in gitAddons if x in gitAddons.keys() and (platform in gitAddons[x]['platforms'] or '_' in gitAddons[x]['platforms'])]))
-                  else:
-                      if dtb == '' and 'dtbstatic' in curAddons:
-                          iscustom = 'false'
-                          errinfo = 'addons 参数错误, "dtbstatic" 无效, dtbstatic 依赖自定义的 dtb 文件.'
-                      elif dtb != '' and 'disks' in curAddons:
-                          iscustom = 'false'
-                          errinfo = 'addons 参数错误, "disks" 无效, 自定义 dtb 文件时只能选 "dtbstatic".'
-                      else:
-                          pass
-                      if iscustom == 'true' and addons != '':
-                          addons = ','.join(curAddons)
-
-              if iscustom == 'true' and modules != '':
-                  req = requests.get('https://raw.githubusercontent.com/wjz304/rp-ext/main/modules.json')
-                  req.encoding = 'utf-8'
-                  gitModules = json.loads(req.text)
-                  curModules = [ x.strip() for x in re.split(',| |\|', modules) if x.strip() != '' ]
-                  curModules = list(set(curModules))
-                  extc = [ x for x in curModules if x not in gitModules.keys() or (platform not in gitModules[x]['platforms'] and '_' not in gitModules[x]['platforms']) ]
-                  if len(extc) > 0:
-                      iscustom = 'false'
-                      errinfo = 'ext 参数错误, "{}" 无效, modules 当前仅支持 "{}".'.format(extc, ','.join([x for x in gitModules if x in gitModules.keys() and (platform in gitModules[x]['platforms'] or '_' in gitModules[x]['platforms'])]))
-                  else:
-                      modules = ','.join(curModules)
-
-              if iscustom == 'true' and ext3rds != '':
-                  curExt3rds = [ x.strip() for x in re.split(',| |\|', ext3rds) if x.strip() != '' ]
-                  curExt3rds = list(set(curExt3rds))
-                  extc = [ x for x in curExt3rds if not x.startswith('http') ]
-                  if len(extc) > 0:
-                      iscustom = 'false'
-                      errinfo = 'ext3rds 参数错误, "{}" 无效, ext3rds 当前仅支持 url 地址.'.format(extc)
-                  else:
-                      ext3rds = ','.join(curExt3rds)
-
-              if iscustom == 'true' and addons == '' and modules == '' and ext3rds == '':
-                  addons = 'boot-wait'   # 当一个 ext 都没有时 /include/file.sh 中 rpt_list_directories 直接 "exit 1"
-
-              if iscustom == 'true' and not dev in ['0', '1']:
-                  dev = '0'
-
-              set_output('issues', issues)
-              set_output('iscustom', iscustom)
-              set_output('errinfo', errinfo)
-              set_output('warinfo', warinfo)
-
-              set_output('jun', jun)
-              set_output('model', model)
-              set_output('version', version)
-              set_output('platform', platform)
-              set_output('lkm', lkm)
-
-              set_output('config', config)
-              set_output('maxdisks', maxdisks)
-              set_output('maxlanport', maxlanport)
-              set_output('internalportcfg', internalportcfg)
-              set_output('esataportcfg', esataportcfg)
-              set_output('usbportcfg', usbportcfg)
-              set_output('sn', sn)
-              set_output('mac', mac)
-              set_output('netif_num', netif_num)
-              set_output('vid', vid)
-              set_output('pid', pid)
-              set_output('diskidxmap', diskidxmap)
-              set_output('sataportmap', sataportmap)
-              set_output('sasidxmap', sasidxmap)
-              set_output('dtb', dtb)
-
-              set_output('addons', addons)
-              set_output('modules', modules)
-              set_output('ext3rds', ext3rds)
-              
-              set_output('dev', dev)
-
-      - name: Echo Build Info
-        run: |
-          echo issues:            '${{ env.issues }}'
-          echo iscustom:          '${{ env.iscustom }}'
-          echo errinfo:           '${{ env.errinfo }}'
-          echo warinfo:           '${{ env.warinfo }}'
-
-          echo jun:               '${{ env.jun }}'
-          echo model:             '${{ env.model }}'
-          echo version:           '${{ env.version }}'
-          echo platform:          '${{ env.platform }}'
-          echo lkm:               '${{ env.lkm }}'
-
-          echo config:            '${{ env.config }}'
-
-          echo maxdisks:          '${{ env.maxdisks }}'
-          echo maxlanport:        '${{ env.maxlanport }}'
-          echo internalportcfg:   '${{ env.internalportcfg }}'
-          echo esataportcfg:      '${{ env.esataportcfg }}'
-          echo usbportcfg:        '${{ env.usbportcfg }}'
-          echo sn:                '${{ env.sn }}'
-          echo mac:               '${{ env.mac }}'
-          echo netif_num:         '${{ env.netif_num }}'
-          echo vid:               '${{ env.vid }}'
-          echo pid:               '${{ env.pid }}'
-          echo diskidxmap:        '${{ env.diskidxmap }}'
-          echo sataportmap:       '${{ env.sataportmap }}'
-          echo sasidxmap:         '${{ env.sasidxmap }}'
-          echo dtb:               '${{ env.dtb }}'
-          echo addons:            '${{ env.addons }}'
-          echo modules:           '${{ env.modules }}'
-          echo ext3rds:           '${{ env.ext3rds }}'
-          echo dev:               '${{ env.dev }}'
-
-
-      - name: Add Issues labels
-        if: env.issues == 'true' && env.iscustom == 'true'
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'add-labels'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ env.issuenumber }}
-          labels: 'custom,${{ env.model }}'
-
-      - name: Update Comment Begin
-        if: env.issues == 'true' && env.iscustom == 'true'
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          comment-id: ${{ steps.comment.outputs.comment-id }}
-          update-mode: replace
-          body: |
-            ${{ env.issueauth }} 您好.  
-            您自定义的 Redpill 已开始构建. 请前往下面的 URL 查看详细信息.  
-            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
-            ----
-          emoji: heart
-
-      - name: Update Comment Error
-        if: env.issues == 'true' && env.iscustom == 'false'
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          comment-id: ${{ steps.comment.outputs.comment-id }}
-          update-mode: replace
-          body: |
-            ${{ env.issueauth }} 您好.  
-            您自定义 Redpill 所填写的信息有误, 无法触发编译, 请参考模板和错误提示对body进行修改并请重新触发编译(Close & Reopen).  
-            `Error Info:`  
-            `${{ env.errinfo }}`  
-            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
-            ----
-          emoji: confused
-
-      - name: Update Comment Warinfo
-        if: env.issues == 'true' && env.warinfo != ''
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          comment-id: ${{ steps.comment.outputs.comment-id }}
-          update-mode: append
-          body: |
-            >
-            ----
-            ‼️‼️‼️ 
-            `Body 中含有自定义的 ${{ env.warinfo }} 敏感信息, 为防止其他人盗用, 建议参考以下视频删除敏感信息(不影响本次编译).`  
-              
-            https://user-images.githubusercontent.com/5615843/187615519-53a6dcf5-a5e2-4731-8889-9eee8955a977.mp4  
-            >
-            ----
-          emoji: eyes
-
-      - name: Update Comment Invalid
-        if: env.issues == 'false'
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          comment-id: ${{ steps.comment.outputs.comment-id }}
-          update-mode: replace
-          body: |
-            ${{ env.issueauth }} 您好.  
-            根据 title 和 body 内容的分析, 该 Issue 并非定制 Redpill. 将在管理员看到后会进行回复.  
-            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
-            ----
-          emoji: eyes
-
-      - name: Create User Config File
-        if: env.iscustom == 'true'
-        shell: python
-        run: |
-          import os, json
-
-          if __name__ == '__main__':
-              config = {
-                  "extra_cmdline": {
-                      "pid": "0x0001",
-                      "vid": "0x46f4",
-                      "sn": "",
-                      "mac1": ""
-                  },
-                  "synoinfo": {
-                      "maxlanport": "7"
-                  },
-                  "ramdisk_copy": {}
-              }
-
-              dat = []
-              if '${{ env.sn }}' == '' or '${{ env.mac }}' == '':
-                  model = '${{ env.model }}'
-                  dat = os.popen('bash ./serialnumbergen.sh {}'.format(model)).readlines()
-
-              if '${{ env.config }}' != '':
-                  inconfig = json.loads('${{ env.config }}')
-                  config.update(inconfig)
-
-              if not "extra_cmdline" in config:
-                  config["extra_cmdline"] = {}
-
-              if '${{ env.vid }}' != '':
-                  config["extra_cmdline"]["vid"] = '${{ env.vid }}'
-              if '${{ env.pid }}' != '':
-                  config["extra_cmdline"]["pid"] = '${{ env.pid }}'
-
-              if '${{ env.sn }}' != '':
-                  config["extra_cmdline"]["sn"] = '${{ env.sn }}'
-              if config["extra_cmdline"]["sn"] == '' and len(dat) == 2:
-                  config["extra_cmdline"]["sn"] = dat[1].strip()
-
-              if '${{ env.mac }}' != '':
-                  macs = '${{ env.mac }}'.split(',')
-                  for index, item in enumerate(macs):
-                      config["extra_cmdline"]["mac{}".format(index+1)] = item.replace(':', '').upper()
-                  config["extra_cmdline"]["netif_num"] = len(macs)
-              else:
-                  netnum = 2
-                  if '${{ env.netif_num }}' != '':
-                      netnum = int('${{ env.netif_num }}')
-                  if len(dat) == 2:
-                      for index in range(netnum):
-                          config["extra_cmdline"]["mac{}".format(index+1)] = hex(int(dat[0].strip().replace(':', ''), 16) + index)[2:].rjust(12,'0').upper()
-                      config["extra_cmdline"]["netif_num"] = netnum
-
-              if '${{ env.diskidxmap }}' != '':
-                  config["extra_cmdline"]["DiskIdxMap"] = '${{ env.diskidxmap }}'
-              if '${{ env.sataportmap }}' != '':
-                  config["extra_cmdline"]["SataPortMap"] = '${{ env.sataportmap }}'
-              if '${{ env.sasidxmap }}' != '':
-                  config["extra_cmdline"]["SasIdxMap"] = '${{ env.sasidxmap }}'
-
-
-              if not "synoinfo" in config:
-                  config["synoinfo"] = {}
-
-              if '${{ env.maxdisks }}' != '':
-                  config["synoinfo"]["maxdisks"] = '${{ env.maxdisks }}'
-              if '${{ env.maxlanport }}' != '':
-                  config["synoinfo"]["maxlanport"] = '${{ env.maxlanport }}'
-              if '${{ env.internalportcfg }}' != '':
-                  config["synoinfo"]["internalportcfg"] = '${{ env.internalportcfg }}'
-              if '${{ env.esataportcfg }}' != '':
-                  config["synoinfo"]["esataportcfg"] = '${{ env.esataportcfg }}'
-              if '${{ env.usbportcfg }}' != '':
-                  config["synoinfo"]["usbportcfg"] = '${{ env.usbportcfg }}'
-
-              print(json.dumps(config, indent=4))
-
-              with open('user_config.json', 'w', encoding="utf-8") as f:
-                  f.write(json.dumps(config, indent=4))
-
-
-      - name: Run Build
-        if: env.iscustom == 'true' && success()
-        run: |
-          # 累了, 毁灭吧
-
-          sudo apt update
-          #sudo apt upgrade -y
-          sudo apt install bspatch jq -y    # curl 新版有毛病
-          sudo apt install rename tree -y   # typo 依赖
-
-
-          # 开始表演
-          echo "============================编译开始============================"
-          jun=${{ env.jun }}
-          lkm=${{ env.lkm }}
-          model=${{ env.model }}
-          version=${{ env.version }}
-          platform=${{ env.platform }}
-          synomodel=$(echo ${model,,} | sed 's/+/p/g')                                   # DS3622xs+ => ds3622xsp
-          synoversion=$(echo ${version} | awk -F - '{print $2}')                         # 7.0.1-42218 => 42218
-
-          bArgs="BRP_DEBUG=1 "
-          if [ "${jun}" == "1" ]; then 
-            bArgs+="BRP_JUN_MOD=1 "
-          fi
-
-          repo=wjz304
-          branch=main
-          git clone -b ${branch} https://github.com/${repo}/redpill-load redpill-load
-
-          # # submodule
-          # [ -d redpill-load/ext/recreate-zImage ] && rm -rf redpill-load/ext/recreate-zImage
-          # git clone -b master https://github.com/kiler129/recreate-zImage.git redpill-load/ext/recreate-zImage
-          # sudo chmod -R a+x redpill-load/ext
-
-          cp user_config.json redpill-load/user_config.json
-
-          cd redpill-load
-
-          # make config
-          sudo pip install -r requirements.txt
-          sudo python syno.py ${model} ${version} ${jun}
-          cat config/${model}/${version}/config.json
-
-          # redpill.ko
-          if [ ! -e ./redpill.ko ]; then
-            echo "======================Download redpill.ko============================="
-            lkmUrl=https://github.com/wjz304/rp-ext/raw/main/
-            rpUrl=$(curl -skL "${lkmUrl}/lkms.json" | jq -r --arg rpko "rp-${platform}-${lkm}.ko.gz" '.[$rpko] | .url')
-            if [ -n "${rpUrl}" ]; then
-              curl -skL "${rpUrl}" -o "rp-${platform}-${lkm}.ko.gz" || true
-              gzip -dcv "rp-${platform}-${lkm}.ko.gz" > "./redpill.ko" || true
-            fi
-          fi
-
-          modinfo ./redpill.ko
-          RPKOVER=$(modinfo --field=vermagic ./redpill.ko | awk '{print $1}')
-          cp -fv ./redpill.ko ./ext/rp-lkm/redpill-linux-v${RPKOVER}.ko
-          sudo chmod -R a+x ./ext/rp-lkm
-
-          RPKOOLD=`echo $(grep "@@@EXT@@@/rp-lkm" ./config/${model}/${version}/config.json | sed -r 's|"@@@EXT@@@/(.*)":(.*)|\1|')`  # `echo $P` 去首尾空格
-          if [ ! "${RPKOOLD}" == "rp-lkm/redpill-linux-v${RPKOVER}.ko" ]; then
-            echo "change ./config/${model}/${version}/config.json from ${RPKOOLD} to rp-lkm/redpill-linux-v${RPKOVER}.ko"
-            sudo sed -i "s|${RPKOOLD}|rp-lkm/redpill-linux-v${RPKOVER}.ko|" ./config/${model}/${version}/config.json
-          fi
-
-          rpext=https://raw.githubusercontent.com/wjz304/rp-ext/master
-
-          # 添加 addons
-          echo "===========================添加 addons ==========================="
-          if [ -n "${{ env.addons }}" ]; then
-            ext=${{ env.addons }}
-            exts=(${ext//,/ })
-            for item in ${exts[@]}; do
-              echo "addons ==> [${item}]"
-              if [ "dtbstatic" == "${item}" -a -n "${{ env.dtb }}" ]; then
-                echo "loacl dtbstatic ..."
-                EXT_PATH="`./ext/dtbstatic/make.sh "${{ env.dtb }}"`"
-                if [ -n "${EXT_PATH}" ]; then 
-                  echo "EXT_PATH: ${EXT_PATH}"
-                  ./ext-manager.sh add "${EXT_PATH}"
-                else
-                  echo "loacl dtbstatic error"
-                  exit 1
-                fi 
-              elif [ "localrss" == "${item}" ]; then
-                echo "loacl localrss ..."
-
-                paturl=$(cat config/${model}/${version}/config.json | jq -r '.os .pat_url')
-                patmd5=$(cat config/${model}/${version}/config.json | jq -r '.os .hash')
-                EXT_PATH="`./ext/localrss/make.sh "${paturl}" "${patmd5}"`"
-                if [ -n "${EXT_PATH}" ]; then 
-                  echo "EXT_PATH: ${EXT_PATH}"
-                  ./ext-manager.sh add "${EXT_PATH}"
-                else
-                  echo "loacl localrss error"
-                  exit 1
-                fi 
-              else
-                ./ext-manager.sh add "${rpext}/addons/${item}/rpext-index.json"
-              fi
-            done
-          fi
-
-          # 添加 modules
-          echo "===========================添加modules ==========================="
-          if [ -n "${{ env.modules }}" ]; then
-            ext=${{ env.modules }}
-            exts=(${ext//,/ })
-            for item in ${exts[@]}; do
-              echo "modules ==> [${item}]"
-              ./ext-manager.sh add "${rpext}/modules/${item}/rpext-index.json"
-            done
-          fi
-
-          # 添加扩展驱动
-          echo "===========================添加ext3rds ==========================="
-          if [ -n "${{ env.ext3rds }}" ]; then
-            ext=${{ env.ext3rds }}
-            exts=(${ext//,/ })
-            for item in ${exts[@]}; do
-              echo "ext3rds ==> [${item}]"
-              ./ext-manager.sh add "${item}"
-            done
-          fi
-
-          #自定义操作
-          if [ -f '../customshell.sh' ]; then
-            if [ "${{ env.issueauth }}" == "${{ github.repository_owner }}" -o "${{ github.triggering_actor }}" == "${{ github.repository_owner }}" ]; then
-              echo "============================自定义操作============================"
-              cp ../customshell.sh customshell.sh
-              chmod a+x customshell.sh
-              source customshell.sh
-            else
-              echo "由于权限太高, 防止有些人执行非法操作, 仅仓库作者可操作, 请联系该仓库管理员或者fork到自己名下操作."
-            fi
-          fi
-
-          # 空间
-          echo "==============================空间=============================="
-          df -h
-
-          # 编译
-          echo "==============================编译=============================="
-          # sed -i "s|#!/usr/bin/env bash|#!/usr/bin/env -S bash -x|g" ./build-loader.sh
-          sudo ${bArgs} BRP_USER_CFG=user_config.json BRP_PLATFORM_KVER=${platform} ./build-loader.sh "${model}" "${version}"
-
-          ls ./custom/extensions | grep -v txt > exts.txt
-          ls -al ./custom/extensions
-
-      - name: Generate release tag
-        if: env.iscustom == 'true' && success()
-        id: tag
-        run: |
-          echo "release_tag=$(date +"%Y.%m.%d-%H%M")" >> $GITHUB_ENV
-
-          if [ ${{ env.issues }} == 'true' ]; then
-            echo "### ${{ env.issueauth }}'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
-            echo "👉 issues: [#${{ env.issuenumber }}](${{ github.event.issue.html_url }})" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ${{ github.triggering_actor }}'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
-            echo "👉 "model": "${{ env.model }}"  " >> $GITHUB_STEP_SUMMARY
-            echo "👉 "version": "${{ env.version }}"  " >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ '${{ env.warinfo }}' != '' ]; then
-            echo "  " >> $GITHUB_STEP_SUMMARY
-            echo "‼️‼️‼️  " >> $GITHUB_STEP_SUMMARY
-            echo 'Body 中含有自定义的 ${{ env.warinfo }} 敏感信息, 为防止其他人盗用, 建议附件下载完成后删除日志和附件.  ' >> $GITHUB_STEP_SUMMARY
-            echo '在👉Issues下评论 "delete builds" 即可删该Issues的所有历史编译记录.  ' >> $GITHUB_STEP_SUMMARY
-          fi
-
-          if [ -f 'body#${{ env.issuenumber }}.txt' ]; then
-            cp body#${{ env.issuenumber }}.txt redpill-load/body#${{ env.issuenumber }}.txt
-            echo -e "\n\nBOOT:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> redpill-load/body#${{ env.issuenumber }}.txt
-          else
-            echo -e "BOOT:\n${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" >> redpill-load/body#actions.txt
-          fi
-
-          configfile=./redpill-load/config/${{ env.model }}/${{ env.version }}/config.json
-          paturl=$(cat ${configfile} | jq -r '.os .pat_url')
-
-          echo -e "\nPAT:\n${paturl}" >> redpill-load/body#${{ env.issuenumber }}.txt
-
-      - name: Upload to Artifacts
-        if: env.iscustom == 'true' && success()
-        uses: actions/upload-artifact@v3
-        with:
-          name: Redpill-${{ env.model }}-${{ env.version }}-${{ env.release_tag }}
-          path: |
-            redpill-load/exts.txt
-            redpill-load/body*.txt
-            redpill-load/user_config.json
-            redpill-load/images/*.img
-
-      - name: Generate release tag
-        if: env.iscustom == 'false'
-        run: |
-          if [ ${{ env.issues }} == 'true' ]; then
-            echo "### ${{ env.issueauth }}'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ${{ github.triggering_actor }}'s Redpill Custom" >> $GITHUB_STEP_SUMMARY
-          fi
-          echo "😞 😔 😟 😕 🙁 ☹️ 😣 😖 😫 😩 🥺 😢  " >> $GITHUB_STEP_SUMMARY
-          echo "您自定义 Redpill 所填写的信息有误, 无法触发编译, 请参考模板和错误提示对body进行修改并请重新触发编译(Close & Reopen).  " >> $GITHUB_STEP_SUMMARY
-          echo "`Error Info:`  " >> $GITHUB_STEP_SUMMARY
-          echo "`${{ env.errinfo }}`  " >> $GITHUB_STEP_SUMMARY
-          if [ '${{ env.warinfo }}' != '' ]; then
-            echo "  " >> $GITHUB_STEP_SUMMARY
-            echo "‼️‼️‼️  " >> $GITHUB_STEP_SUMMARY
-            echo 'Body 中含有自定义的 ${{ env.warinfo }} 敏感信息, 为防止其他人盗用, 建议确认错误原因后删除日志和附件.  ' >> $GITHUB_STEP_SUMMARY
-            echo '在👉Issues下评论 "delete builds" 即可删👉Issues的所有历史编译记录.  ' >> $GITHUB_STEP_SUMMARY
-          fi
-
-
-      - name: Update Comment Finish
-        if: env.issues == 'true' && env.iscustom == 'true' && success()
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          comment-id: ${{ steps.comment.outputs.comment-id }}
-          update-mode: replace
-          body: |
-            ${{ env.issueauth }} 您好.
-            您自定义的 Redpill 已构建完成. 请前往下面的 URL 下载.  
-            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
-            ----  
-            PS:  
-            在Issues下评论 "transfer" 附件转快传 🚲->🏍. (请勿重复发, 操作时间 ≈ 成功个数 X 3分钟). 
-            在Issues下评论 "delete builds" 即可删该Issues的所有历史编译记录.
-            >  
-            ----  
-          emoji: hooray
-
-      - name: Close Issues
-        if: env.issues == 'true' && env.iscustom == 'true' && success()
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'close-issue'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          issue-number: ${{ env.issuenumber }}
-
-      - name: Update Comment Fail
-        if: env.issues == 'true' && env.iscustom == 'true' && failure()
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          comment-id: ${{ steps.comment.outputs.comment-id }}
-          update-mode: replace
-          body: |
-            ${{ env.issueauth }} 您好.
-            您自定义的 Redpill 构建失败. 请前往下面的 URL 查看详细信息对body进行修改并请重新触发编译(Close & Reopen).  
-            > ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}  
-            ----
-            PS:  
-            在Issues下评论 "delete builds" 即可删该Issues的所有历史编译记录.
-            >  
-            ----  
-          emoji: confused
-
-      - name: Update Comment Warinfo
-        if: env.issues == 'true' && env.warinfo != ''
-        uses: actions-cool/issues-helper@v3
-        with:
-          actions: 'update-comment'
-          token: ${{ secrets.GITHUB_TOKEN }}
-          comment-id: ${{ steps.comment.outputs.comment-id }}
-          update-mode: append
-          body: |
-            >
-            ----
-            ‼️‼️‼️  
-            `Body 中含有自定义的 ${{ env.warinfo }} 敏感信息, 为防止其他人盗用, 建议附件下载完成/确认错误原因后删除日志和附件.`
-            `在Issues下评论 "delete builds" 即可删Issues的所有历史编译记录.`  
-            >
-            ----
-          emoji: eyes
+                              url='https://api.github.com/repos/{}/issues/{}'.format('${{ github.repository }}', item['number'])
+                              res = requests.post(url=url, data=data, headers=headers)
+                              print(url)
+                              print(res.json())
+                          except:
+                              pass
+              except Exception as err:
+                  print(err)
