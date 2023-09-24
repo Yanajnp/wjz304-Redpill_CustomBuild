@@ -1,0 +1,61 @@
+#
+# Copyright (C) 2022 Ing <https://github.com/wjz304>
+# 
+# This is free software, licensed under the MIT License.
+# See /LICENSE for more information.
+#
+
+
+name: Refresh CDN
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  # https://docs.github.com/cn/actions/learn-github-actions/expressions
+  dump:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dump GitHub context
+        id: github_context_step
+        run: echo '${{ toJSON(github) }}'
+      - name: Dump job context
+        run: echo '${{ toJSON(job) }}'
+      - name: Dump steps context
+        run: echo '${{ toJSON(steps) }}'
+      - name: Dump runner context
+        run: echo '${{ toJSON(runner) }}'
+      - name: Dump strategy context
+        run: echo '${{ toJSON(strategy) }}'
+      - name: Dump matrix context
+        run: echo '${{ toJSON(matrix) }}'
+
+  refresh:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@main
+
+      - name: Refresh CDN
+        run : |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          sudo timedatectl set-timezone "Asia/Shanghai"
+
+          # # curl 参数说明
+          # -f, --fail              连接失败时不显示HTTP错误信息 (H)
+          # -k, --insecure          允许连接到 SSL 站点，而不使用证书 (H)
+          # -L, --location          跟踪重定向 (H)
+          # -o, --output FILE       将输出写入文件，而非 stdout
+          # -O, --remote-name       将输出写入远程文件
+          # -S, --show-error        显示错误. 在选项 -s 中，当 curl 出现错误时将显示
+          # -s, --silent            Silent模式。不输出任务内容
+          # -w, --write-out FORMAT  完成后输出什么
+          # -#/--progress-bar	      用进度条显示当前的传送状态
+
+          curl -L "https://purge.jsdelivr.net/gh/wjz304/Redpill_CustomBuild@main/docs/parameter.json"
+          curl -L "https://purge.jsdelivr.net/gh/wjz304/Redpill_CustomBuild@main/docs/tips.md"
+
+          curl -L "https://cdn.statically.io/gh/wjz304/Redpill_CustomBuild/main/docs/parameter.json"
+          curl -L "https://cdn.statically.io/gh/wjz304/Redpill_CustomBuild/main/docs/tips.md"
+          
